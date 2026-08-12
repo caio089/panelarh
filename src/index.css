@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+@import "tailwindcss";
+
+:root {
+  --pv-navy: #1B2A57;
+  --pv-navy-deep: #121D40;
+  --pv-navy-light: #24356E;
+  --pv-terracotta: #E15B3F;
+  --pv-cream: #EFE3C4;
+  --pv-surface: #FBF9F3;
+  --pv-display: 'Montserrat', system-ui, sans-serif;
+  --pv-body: 'Montserrat', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--pv-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--pv-navy);
+  background:
+    radial-gradient(circle at 12% -10%, #2a3f7a 0%, transparent 42%),
+    radial-gradient(circle at 90% 10%, rgba(225, 91, 63, 0.18) 0%, transparent 35%),
+    linear-gradient(165deg, #121D40 0%, #0E1730 55%, #0A1228 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display {
+  font-family: var(--pv-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.pv-surface {
+  background: var(--pv-surface);
+}
+
+.pv-card {
+  background: #fff;
+  border: 1px solid #E7E2D3;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.pv-glass {
+  background: rgba(247, 244, 236, 0.97);
+  border: 1px solid rgba(231, 226, 211, 0.9);
+  backdrop-filter: blur(10px);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s ease-out both;
+}
+
+@keyframes stamp-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pv-stamp-spin {
+  animation: stamp-spin 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .pv-stamp-spin {
+    animation: none;
+  }
+}
+
+/* scrollbar suave no board */
+.pv-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.pv-scroll::-webkit-scrollbar-thumb {
+  background: rgba(27, 42, 87, 0.25);
+  border-radius: 999px;
+}
