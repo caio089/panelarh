@@ -9,29 +9,15 @@ import {
 } from 'react'
 import type { User } from '@supabase/supabase-js'
 import type { Profile } from '@/types'
-import {
-  clearMockSession,
-  createMockCandidate,
-  findPresetAccount,
-  loadMockSession,
-  saveMockSession,
-  type MockSession,
-} from '@/lib/mockAuth'
-import { api, getApiToken, pingApi, setApiToken } from '@/lib/api'
-
-const USE_SQLITE = import.meta.env.VITE_USE_SQLITE === 'true'
+import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 
 interface AuthContextValue {
-  session: MockSession | null
   user: User | null
   profile: Profile | null
   loading: boolean
-  mockMode: boolean
-  sqliteMode: boolean
   refreshProfile: () => Promise<void>
   signIn: (email: string, password: string) => Promise<{ error?: string }>
   signUp: (email: string, password: string, fullName: string) => Promise<{ error?: string }>
-  signInAsMock: (email: string, password: string) => Promise<{ error?: string }>
   updateLocalProfile: (patch: Partial<Profile>) => void
   signOut: () => Promise<void>
   isStaff: boolean
@@ -40,220 +26,152 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function toUser(session: MockSession | null): User | null {
-  if (!session) return null
-  return {
-    id: session.user.id,
-    email: session.user.email,
-    app_metadata: {},
-    user_metadata: { full_name: session.profile.full_name },
-    aud: 'authenticated',
-    created_at: new Date().toISOString(),
-  } as User
+async function fetchProfile(userId: string): Promise<Profile | null> {
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+  if (error) {
+    console.error('Erro ao carregar perfil:', error.message)
+    return null
+  }
+  return data as Profile | null
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<MockSession | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
-  const [sqliteOnline, setSqliteOnline] = useState(false)
 
-  const persistLocal = useCallback((next: MockSession | null) => {
-    setSession(next)
-    if (next) saveMockSession(next)
-    else clearMockSession()
+  const syncUser = useCallback(async (nextUser: User | null) => {
+    setUser(nextUser)
+    if (!nextUser) {
+      setProfile(null)
+      return
+    }
+
+    let nextProfile = await fetchProfile(nextUser.id)
+    if (!nextProfile) {
+      const { error } = await supabase.from('profiles').upsert({
+        id: nextUser.id,
+        email: nextUser.email,
+        full_name:
+          (nextUser.user_metadata?.full_name as string | undefined) ||
+          nextUser.email?.split('@')[0] ||
+          'Usuário',
+        role: 'candidate',
+      })
+      if (error) console.error(error.message)
+      nextProfile = await fetchProfile(nextUser.id)
+    }
+    setProfile(nextProfile)
   }, [])
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      if (USE_SQLITE) {
-        const ok = await pingApi()
-        if (!mounted) return
-        setSqliteOnline(ok)
-        if (ok) {
-          const token = getApiToken()
-          if (token) {
-            try {
-              const me = await api<{ user: { id: string; email: string }; profile: Profile }>('/api/auth/me')
-              if (!mounted) return
-              const next = { user: me.user, profile: me.profile }
-              setSession(next)
-              saveMockSession(next)
-              setLoading(false)
-              return
-            } catch {
-              setApiToken(null)
-            }
-          }
-          setLoading(false)
-          return
-        }
-      }
-      // fallback mock
-      setSession(loadMockSession())
+    if (!isSupabaseConfigured()) {
+      console.error('Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.')
       setLoading(false)
+      return
+    }
+
+    let mounted = true
+    let unsubscribe: (() => void) | undefined
+
+    ;(async () => {
+      const { data } = await supabase.auth.getSession()
+      if (!mounted) return
+      await syncUser(data.session?.user ?? null)
+      if (mounted) setLoading(false)
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        void syncUser(session?.user ?? null)
+      })
+      unsubscribe = () => subscription.unsubscribe()
     })()
+
     return () => {
       mounted = false
+      unsubscribe?.()
     }
-  }, [])
+  }, [syncUser])
 
   const refreshProfile = useCallback(async () => {
-    if (USE_SQLITE && sqliteOnline && getApiToken()) {
-      try {
-        const me = await api<{ user: { id: string; email: string }; profile: Profile }>('/api/auth/me')
-        const next = { user: me.user, profile: me.profile }
-        setSession(next)
-        saveMockSession(next)
-        return
-      } catch {
-        /* ignore */
-      }
-    }
-    const current = loadMockSession()
-    if (current) setSession(current)
-  }, [sqliteOnline])
+    if (!user) return
+    const next = await fetchProfile(user.id)
+    if (next) setProfile(next)
+  }, [user])
 
-  const updateLocalProfile = useCallback(
-    (patch: Partial<Profile>) => {
-      setSession((prev) => {
-        if (!prev) return prev
-        const next = { ...prev, profile: { ...prev.profile, ...patch } }
-        saveMockSession(next)
-
-        if (USE_SQLITE && sqliteOnline && getApiToken()) {
-          void api('/api/profile', { method: 'PATCH', json: patch }).catch(console.error)
-        }
-        return next
-      })
-    },
-    [sqliteOnline],
-  )
+  const updateLocalProfile = useCallback((patch: Partial<Profile>) => {
+    setProfile((prev) => {
+      if (!prev) return prev
+      const next = { ...prev, ...patch }
+      void supabase
+        .from('profiles')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', prev.id)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+        })
+      return next
+    })
+  }, [])
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      if (USE_SQLITE && (sqliteOnline || (await pingApi()))) {
-        try {
-          setSqliteOnline(true)
-          const data = await api<{
-            token: string
-            user: { id: string; email: string }
-            profile: Profile
-          }>('/api/auth/login', { method: 'POST', json: { email, password } })
-          setApiToken(data.token)
-          persistLocal({ user: data.user, profile: data.profile })
-          return {}
-        } catch (e) {
-          return { error: e instanceof Error ? e.message : 'Erro no login' }
-        }
-      }
-
-      const preset = findPresetAccount(email.trim(), password)
-      if (preset) {
-        persistLocal({
-          user: { id: preset.profile.id, email: preset.email },
-          profile: { ...preset.profile },
-        })
-        return {}
-      }
-      if (!email.trim() || password.length < 3) {
-        return { error: 'Informe e-mail e senha' }
-      }
-      persistLocal(createMockCandidate(email.trim(), email.split('@')[0]))
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (error) return { error: error.message }
+      await syncUser(data.user)
       return {}
     },
-    [persistLocal, sqliteOnline],
+    [syncUser],
   )
 
   const signUp = useCallback(
     async (email: string, password: string, fullName: string) => {
       if (!email.trim()) return { error: 'Informe um e-mail' }
+      if (password.length < 6) return { error: 'A senha precisa ter pelo menos 6 caracteres' }
 
-      if (USE_SQLITE && (sqliteOnline || (await pingApi()))) {
-        try {
-          setSqliteOnline(true)
-          const data = await api<{
-            token: string
-            user: { id: string; email: string }
-            profile: Profile
-          }>('/api/auth/register', {
-            method: 'POST',
-            json: { email, password, fullName },
-          })
-          setApiToken(data.token)
-          persistLocal({ user: data.user, profile: data.profile })
-          return {}
-        } catch (e) {
-          return { error: e instanceof Error ? e.message : 'Erro ao criar conta' }
-        }
-      }
-
-      persistLocal(createMockCandidate(email.trim(), fullName.trim()))
-      return {}
-    },
-    [persistLocal, sqliteOnline],
-  )
-
-  const signInAsMock = useCallback(
-    async (email: string, password: string) => {
-      // Preferências demo: se sqlite online e for admin seed, usa API
-      if (USE_SQLITE && email === 'admin@panela.local' && (sqliteOnline || (await pingApi()))) {
-        return signIn('admin@panela.local', 'admin123')
-      }
-      const preset = findPresetAccount(email.trim(), password)
-      if (!preset) return { error: 'Conta demo não encontrada' }
-      persistLocal({
-        user: { id: preset.profile.id, email: preset.email },
-        profile: { ...preset.profile },
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { full_name: fullName.trim() } },
       })
-      return {}
+      if (error) return { error: error.message }
+      if (!data.user) return { error: 'Não foi possível criar a conta' }
+
+      if (data.session?.user) {
+        await syncUser(data.session.user)
+        return {}
+      }
+
+      // Autoconfirm pode retornar sessão null em alguns casos — tenta login direto
+      return signIn(email.trim(), password)
     },
-    [persistLocal, signIn, sqliteOnline],
+    [signIn, syncUser],
   )
 
   const signOut = useCallback(async () => {
-    if (USE_SQLITE && getApiToken()) {
-      try {
-        await api('/api/auth/logout', { method: 'POST' })
-      } catch {
-        /* ignore */
-      }
-      setApiToken(null)
-    }
-    persistLocal(null)
-  }, [persistLocal])
-
-  const profile = session?.profile ?? null
+    await supabase.auth.signOut()
+    setUser(null)
+    setProfile(null)
+  }, [])
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      session,
-      user: toUser(session),
+      user,
       profile,
       loading,
-      mockMode: !(USE_SQLITE && sqliteOnline),
-      sqliteMode: USE_SQLITE && sqliteOnline,
       refreshProfile,
       signIn,
       signUp,
-      signInAsMock,
       updateLocalProfile,
       signOut,
       isStaff: profile?.role === 'admin' || profile?.role === 'lider',
       isAdmin: profile?.role === 'admin',
     }),
-    [
-      session,
-      profile,
-      loading,
-      sqliteOnline,
-      refreshProfile,
-      signIn,
-      signUp,
-      signInAsMock,
-      updateLocalProfile,
-      signOut,
-    ],
+    [user, profile, loading, refreshProfile, signIn, signUp, updateLocalProfile, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

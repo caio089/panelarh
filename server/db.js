@@ -19,65 +19,9 @@ const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')
 db.exec(schema)
 
 function seedIfEmpty() {
-  const unitsCount = db.prepare('SELECT COUNT(*) AS c FROM units').get().c
-  if (unitsCount > 0) return
+  const usersCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c
+  if (usersCount > 0) return
 
-  const insertUnit = db.prepare('INSERT INTO units (id, name) VALUES (?, ?)')
-  const unitCentro = 'unit-centro'
-  const unitSudeste = 'unit-sudeste'
-  const unitNorte = 'unit-norte'
-
-  insertUnit.run(unitCentro, 'Unidade Centro')
-  insertUnit.run(unitSudeste, 'Unidade Sudeste')
-  insertUnit.run(unitNorte, 'Unidade Norte')
-
-  const insertVaga = db.prepare(`
-    INSERT INTO vagas (id, unit_id, titulo, descricao, localidade, tipo, ativa, criada_em)
-    VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
-  `)
-
-  insertVaga.run(
-    'vaga-chapeiro',
-    unitCentro,
-    'Chapeiro',
-    'Responsável pela produção na chapa, padronização de montagem e qualidade dos pratos quentes.',
-    'Centro · SP',
-    'Presencial',
-  )
-  insertVaga.run(
-    'vaga-garcom',
-    unitCentro,
-    'Garçom / Atendente',
-    'Atendimento ao salão, hospitalidade e ritmo de casa cheia.',
-    'Centro · SP',
-    'Presencial',
-  )
-  insertVaga.run(
-    'vaga-gerente',
-    unitSudeste,
-    'Gerente de Loja',
-    'Liderança da operação, gestão de equipe e indicadores na Unidade Sudeste.',
-    'Sudeste · SP',
-    'Presencial',
-  )
-  insertVaga.run(
-    'vaga-auxiliar',
-    unitSudeste,
-    'Auxiliar de Cozinha',
-    'Apoio à produção, mise en place, organização e limpeza.',
-    'Sudeste · SP',
-    'Presencial',
-  )
-  insertVaga.run(
-    'vaga-caixa',
-    unitNorte,
-    'Operador de Caixa',
-    'Atendimento no caixa e experiência acolhedora no balcão.',
-    'Zona Norte · SP',
-    'Presencial',
-  )
-
-  // Admin de teste
   const adminId = 'user-admin'
   const hash = bcrypt.hashSync('admin123', 10)
   db.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').run(
@@ -90,7 +34,7 @@ function seedIfEmpty() {
     VALUES (?, ?, ?, 'admin', 1)
   `).run(adminId, 'admin@panela.local', 'Admin Panela')
 
-  console.log('[sqlite] Seed aplicado (unidades, vagas, admin@panela.local / admin123)')
+  console.log('[sqlite] Seed aplicado (admin@panela.local / admin123). Unidades são criadas no painel.')
 }
 
 seedIfEmpty()

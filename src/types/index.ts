@@ -21,6 +21,13 @@ export interface Vaga {
   tipo: string | null
   ativa: boolean | null
   criada_em: string
+  salario?: string | null
+  horario?: string | null
+  regime?: string | null
+  responsabilidades?: string | null
+  requisitos?: string | null
+  diferenciais?: string | null
+  beneficios?: string | null
   unit?: Unit
   candidatos?: Candidato[]
 }
@@ -44,6 +51,13 @@ export interface Profile {
   disc_s: number | null
   disc_c: number | null
   onboarding_completed: boolean | null
+  about_me?: string | null
+  weekend_availability?: string | null
+  shifts?: string | null
+  preferred_unit?: string | null
+  relevant_experience?: string | null
+  why_company?: string | null
+  has_transport?: string | null
 }
 
 export interface Experience {

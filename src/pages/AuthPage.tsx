@@ -1,13 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { MOCK_ACCOUNTS } from '@/lib/mockAuth'
 import { BrandMark } from '@/components/Layout'
-import { Button, Field, Input } from '@/components/ui'
+import { Alert, Button, Field, Input, SegmentedControl } from '@/components/ui'
 
-/** Login / cadastro só para candidatos (página pública de vagas) */
 export function AuthPage() {
-  const { signIn, signUp, signInAsMock, user, profile, loading, mockMode, sqliteMode } = useAuth()
+  const { signIn, signUp, user, profile, loading } = useAuth()
   const [params] = useSearchParams()
   const redirect = params.get('redirect') || '/candidato'
   const navigate = useNavigate()
@@ -18,8 +16,6 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-
-  const candidatePreset = MOCK_ACCOUNTS.find((a) => a.profile.role === 'candidate')
 
   useEffect(() => {
     if (loading || !user) return
@@ -47,91 +43,85 @@ export function AuthPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-5 py-10">
-      <div className="animate-fade-up w-full max-w-[420px]">
-        <div className="mb-6 flex justify-center">
-          <Link to="/">
+    <div className="relative flex min-h-screen items-center justify-center px-5 py-10">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-16 top-20 h-64 w-64 rounded-full bg-[var(--pv-terracotta)]/20 blur-3xl" />
+        <div className="absolute bottom-10 right-0 h-72 w-72 rounded-full bg-[var(--pv-cream)]/10 blur-3xl" />
+      </div>
+
+      <div className="animate-fade-up relative w-full max-w-[440px]">
+        <div className="mb-7 flex justify-center">
+          <Link to="/" aria-label="Voltar ao início">
             <BrandMark />
           </Link>
         </div>
 
-        <div className="rounded-[18px] bg-[#FBF9F3] p-8 shadow-[0_30px_70px_rgba(0,0,0,0.45)]">
-          <p className="text-center text-[11px] font-bold uppercase tracking-[1.4px] text-[var(--pv-terracotta)]">
-            Área do candidato
-          </p>
-          <h1 className="mt-1 font-display text-center text-[22px] font-bold text-[var(--pv-navy)]">
-            {mode === 'login' ? 'Entrar' : 'Criar conta'}
+        <div className="rounded-2xl border border-white/10 bg-[var(--pv-surface)] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:p-8">
+          <p className="pv-eyebrow text-center">Área do candidato</p>
+          <h1 className="mt-1 text-center font-display text-[24px] text-[var(--pv-navy)]">
+            {mode === 'login' ? 'Bem-vindo de volta' : 'Comece sua candidatura'}
           </h1>
-          <p className="mt-1 text-center text-[13px] text-[#6B664F]">
-            {sqliteMode
-              ? 'Contas salvas no SQLite local de teste'
-              : 'Veja vagas, complete seu perfil e candidate-se. Seus dados vão para o RH.'}
+          <p className="mt-2 text-center text-[13px] leading-relaxed text-[var(--pv-muted)]">
+            {mode === 'login'
+              ? 'Acesse para acompanhar vagas, perfil e mensagens do RH.'
+              : 'Crie sua conta, complete o perfil e candidate-se às vagas abertas.'}
           </p>
 
-          {mockMode && !sqliteMode && candidatePreset && (
-            <button
-              type="button"
-              disabled={busy}
-              className="mt-5 flex w-full items-center rounded-xl border-[1.5px] border-[#E7E2D3] bg-white px-3.5 py-3 text-left hover:border-[var(--pv-terracotta)]"
-              onClick={() => void signInAsMock(candidatePreset.email, candidatePreset.password)}
-            >
-              <div>
-                <div className="font-bold text-[var(--pv-navy)]">Entrar como candidato demo</div>
-                <div className="text-[12.5px] text-[#6B664F]">Perfil já preenchido para testar</div>
-              </div>
-            </button>
-          )}
-
-          <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-[#F1EDE0] p-1">
-            <button
-              type="button"
-              className={`rounded-lg py-2 text-sm font-bold ${mode === 'login' ? 'bg-white text-[var(--pv-navy)] shadow-sm' : 'text-[#6B664F]'}`}
-              onClick={() => setMode('login')}
-            >
-              Login
-            </button>
-            <button
-              type="button"
-              className={`rounded-lg py-2 text-sm font-bold ${mode === 'signup' ? 'bg-white text-[var(--pv-navy)] shadow-sm' : 'text-[#6B664F]'}`}
-              onClick={() => setMode('signup')}
-            >
-              Cadastro
-            </button>
+          <div className="mt-5">
+            <SegmentedControl
+              value={mode}
+              onChange={(v) => {
+                setMode(v as 'login' | 'signup')
+                setError('')
+              }}
+              options={[
+                { value: 'login', label: 'Entrar' },
+                { value: 'signup', label: 'Criar conta' },
+              ]}
+            />
           </div>
 
-          <form className="mt-4 space-y-3.5" onSubmit={(e) => void onSubmit(e)}>
-            {mode === 'signup' && (
+          <form className="mt-5 space-y-3.5" onSubmit={(e) => void onSubmit(e)}>
+            {mode === 'signup' ? (
               <Field label="Nome completo">
-                <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="Seu nome" />
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  autoComplete="name"
+                  placeholder="Seu nome"
+                />
               </Field>
-            )}
+            ) : null}
             <Field label="E-mail">
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
                 placeholder="voce@email.com"
               />
             </Field>
-            <Field label="Senha">
+            <Field label="Senha" hint={mode === 'signup' ? 'Mínimo de 6 caracteres' : undefined}>
               <Input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={3}
-                placeholder="Crie uma senha"
+                minLength={6}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                placeholder={mode === 'login' ? 'Sua senha' : 'Crie uma senha'}
               />
             </Field>
-            {error ? <p className="text-sm font-semibold text-[#B23B3B]">{error}</p> : null}
-            <Button type="submit" className="mt-2 w-full" disabled={busy}>
+            {error ? <Alert tone="error">{error}</Alert> : null}
+            <Button type="submit" className="mt-1 w-full" size="lg" disabled={busy}>
               {busy ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta e continuar'}
             </Button>
           </form>
 
-          <p className="mt-5 text-center text-[12px] text-[#6B664F]">
-            <Link to="/" className="font-semibold text-[var(--pv-navy)]">
+          <p className="mt-6 text-center text-[12.5px] text-[var(--pv-muted)]">
+            <Link to="/" className="font-semibold text-[var(--pv-navy)] hover:text-[var(--pv-terracotta)]">
               ← Voltar às vagas
             </Link>
           </p>

@@ -1,6 +1,6 @@
 import type { Candidato, Profile, Vaga } from '@/types'
 
-/** Score mock de “IA” cruzando perfil do candidato com requisitos da vaga */
+/** Score de match cruzando perfil do candidato com requisitos da vaga */
 export function scoreCandidateForVaga(
   candidato: Candidato,
   vaga: Vaga,
@@ -98,7 +98,50 @@ export function scoreCandidateForVaga(
   score = Math.max(5, Math.min(98, Math.round(score)))
   if (reasons.length === 0) reasons.push('Perfil geral avaliado pela IA')
 
-  return { score, reasons: reasons.slice(0, 4) }
+  return { score, reasons: reasons.slice(0, 6) }
+}
+
+export type SelectionPick = {
+  nome: string
+  score: number
+  reasons: string[]
+}
+
+/** Texto da IA explicando o corte: por que estes N avançaram. */
+export function explainSelection(input: {
+  vagaTitle: string
+  requested: number
+  poolSize: number
+  selected: SelectionPick[]
+  nextOut?: SelectionPick | null
+}): { headline: string; summary: string; picks: string[] } {
+  const n = input.selected.length
+  const vaga = input.vagaTitle || 'esta vaga'
+  const asked = Math.max(1, input.requested)
+
+  let summary = `Você pediu ${asked} pessoa${asked === 1 ? '' : 's'} para a vaga ${vaga}. `
+  if (input.poolSize <= n) {
+    summary += `Há ${input.poolSize} candidato${input.poolSize === 1 ? '' : 's'} no processo — todos avançaram neste corte.`
+  } else {
+    summary += `Entre ${input.poolSize} candidatos, a IA ficou com ${n}: melhor cruzamento de cargo, DISC, experiência e o que a vaga pede.`
+  }
+
+  if (input.nextOut && n < input.poolSize) {
+    summary += ` O próximo da fila (${input.nextOut.nome}, ${input.nextOut.score}%) ficou de fora neste corte.`
+  }
+
+  const picks = input.selected.map((pick, idx) => {
+    const why = pick.reasons.length
+      ? pick.reasons.join('; ').replace(/; $/, '')
+      : 'perfil geral compatível com a vaga'
+    return `${idx + 1}. ${pick.nome} (${pick.score}%) — ${why}.`
+  })
+
+  return {
+    headline: n === 1 ? 'Por que a IA escolheu esta pessoa' : `Por que a IA escolheu estas ${n} pessoas`,
+    summary,
+    picks,
+  }
 }
 
 export function phoneToWhatsApp(phone?: string | null) {
@@ -114,6 +157,3 @@ export function buildWhatsAppUrl(phone: string, message: string) {
   if (!n) return null
   return `https://wa.me/${n}?text=${encodeURIComponent(message)}`
 }
-
-export const DEFAULT_WHATSAPP_MSG =
-  'Olá! Parabéns 🎉 Você passou para a próxima fase do processo seletivo da Panela Velha. Em breve entraremos em contato com os próximos passos.'

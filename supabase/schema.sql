@@ -226,3 +226,33 @@ alter table public.candidatos
   add constraint candidatos_status_check
   check (status in ('pendente', 'entrevista', 'aprovada', 'reprovada', 'banco'));
 
+-- Grants: helpers usados nas policies RLS (anon precisa para avaliar USING)
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+grant execute on function public.is_staff() to anon, authenticated;
+grant execute on function public.is_admin() to anon, authenticated;
+
+-- Unidades e vagas são cadastradas pelo admin no painel (sem seed).
+
+-- Admin de produção: criar usuário em Authentication e depois:
+-- update public.profiles set role = 'admin' where email = 'seu-admin@email.com';
+
+-- Detalhes enriquecidos da vaga (página pública)
+alter table public.vagas
+  add column if not exists salario text,
+  add column if not exists horario text,
+  add column if not exists regime text default 'CLT',
+  add column if not exists responsabilidades text,
+  add column if not exists requisitos text,
+  add column if not exists diferenciais text,
+  add column if not exists beneficios text;
+
+-- Campos do formulário "Vem trabalhar com a gente!"
+alter table public.profiles
+  add column if not exists about_me text,
+  add column if not exists weekend_availability text,
+  add column if not exists shifts text,
+  add column if not exists preferred_unit text,
+  add column if not exists relevant_experience text,
+  add column if not exists why_company text,
+  add column if not exists has_transport text;
+

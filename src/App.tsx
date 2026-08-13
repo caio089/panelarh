@@ -12,6 +12,7 @@ import { AdminDashboardPage } from '@/pages/AdminDashboardPage'
 import { AdminBoardPage } from '@/pages/AdminBoardPage'
 import { AdminVagaPage } from '@/pages/AdminVagaPage'
 import { AdminVagasListPage, AdminCandidatesPage } from '@/pages/AdminListsPage'
+import { AdminUnitsPage } from '@/pages/AdminUnitsPage'
 import { AdminSelectionPage } from '@/pages/AdminSelectionPage'
 import { CandidateMessagesPage } from '@/pages/CandidateMessagesPage'
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/admin" element={<AdminShell />}>
               <Route index element={<AdminDashboardPage />} />
               <Route path="quadro" element={<AdminBoardPage />} />
+              <Route path="unidades" element={<AdminUnitsPage />} />
               <Route path="vagas" element={<AdminVagasListPage />} />
               <Route path="vagas/:id" element={<AdminVagaPage />} />
               <Route path="candidatos" element={<AdminCandidatesPage />} />

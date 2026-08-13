@@ -7,19 +7,13 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { CandidateStatus, Candidato, Experience, Message, Profile, Vaga } from '@/types'
-import { createInitialStore, type MockStore, UNIT_CENTRO } from '@/lib/mockData'
-import { uid } from '@/lib/utils'
-import { api, pingApi } from '@/lib/api'
-
-const STORAGE_KEY = 'panela_rh_mock_store_v2'
-const USE_SQLITE = import.meta.env.VITE_USE_SQLITE === 'true'
+import type { CandidateStatus, Candidato, Experience, Message, Profile, Unit, Vaga } from '@/types'
+import { emptyStore, type AppStore } from '@/lib/data'
+import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 
 interface DataContextValue {
-  store: MockStore
-  sqliteMode: boolean
+  store: AppStore
   refreshStore: () => Promise<void>
-  resetStore: () => void
   addVaga: (input: {
     unitId: string
     titulo: string
@@ -27,10 +21,34 @@ interface DataContextValue {
     localidade?: string
     tipo?: string
     ativa?: boolean
-  }) => string
+    salario?: string
+    horario?: string
+    regime?: string
+    responsabilidades?: string
+    requisitos?: string
+    diferenciais?: string
+    beneficios?: string
+  }) => Promise<string>
   updateVaga: (
     vagaId: string,
-    patch: Partial<Pick<Vaga, 'titulo' | 'descricao' | 'localidade' | 'tipo' | 'ativa' | 'unit_id'>>,
+    patch: Partial<
+      Pick<
+        Vaga,
+        | 'titulo'
+        | 'descricao'
+        | 'localidade'
+        | 'tipo'
+        | 'ativa'
+        | 'unit_id'
+        | 'salario'
+        | 'horario'
+        | 'regime'
+        | 'responsabilidades'
+        | 'requisitos'
+        | 'diferenciais'
+        | 'beneficios'
+      >
+    >,
   ) => void
   deleteVaga: (vagaId: string) => void
   updateCandidatoStatus: (
@@ -50,6 +68,9 @@ interface DataContextValue {
     info?: string | null
   }) => Promise<{ error?: string; candidatoId?: string }>
   sendMessage: (candidatoId: string, senderId: string, body: string) => void
+  addUnit: (name: string) => Promise<string>
+  updateUnit: (id: string, name: string) => Promise<void>
+  deleteUnit: (id: string) => Promise<void>
   getVaga: (id: string) => (Vaga & { unitName?: string }) | undefined
   getCandidatosByVaga: (vagaId: string) => Candidato[]
   getMessagesForProfile: (profileId: string) => Message[]
@@ -57,182 +78,248 @@ interface DataContextValue {
 
 const DataContext = createContext<DataContextValue | null>(null)
 
-function loadStore(): MockStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as MockStore
-  } catch {
-    /* ignore */
+async function fetchStore(): Promise<AppStore> {
+  const [unitsRes, vagasRes, candidatosRes, profilesRes, experiencesRes, messagesRes] =
+    await Promise.all([
+      supabase.from('units').select('*').order('name'),
+      supabase.from('vagas').select('*').order('criada_em', { ascending: false }),
+      supabase.from('candidatos').select('*').order('criado_em', { ascending: false }),
+      supabase.from('profiles').select('*'),
+      supabase.from('experiences').select('*'),
+      supabase.from('messages').select('*').order('created_at', { ascending: false }),
+    ])
+
+  if (unitsRes.error) console.error('units:', unitsRes.error.message)
+  if (vagasRes.error) console.error('vagas:', vagasRes.error.message)
+  if (candidatosRes.error) console.error('candidatos:', candidatosRes.error.message)
+  if (profilesRes.error) console.error('profiles:', profilesRes.error.message)
+  if (experiencesRes.error) console.error('experiences:', experiencesRes.error.message)
+  if (messagesRes.error) console.error('messages:', messagesRes.error.message)
+
+  return {
+    units: unitsRes.data ?? [],
+    vagas: (vagasRes.data ?? []) as Vaga[],
+    candidatos: (candidatosRes.data ?? []) as Candidato[],
+    profiles: (profilesRes.data ?? []) as Profile[],
+    experiences: (experiencesRes.data ?? []) as Experience[],
+    messages: (messagesRes.data ?? []) as Message[],
   }
-  return createInitialStore()
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [store, setStore] = useState<MockStore>(() => createInitialStore())
-  const [sqliteMode, setSqliteMode] = useState(false)
+  const [store, setStore] = useState<AppStore>(() => emptyStore())
 
   const refreshStore = useCallback(async () => {
-    if (!USE_SQLITE) return
+    if (!isSupabaseConfigured()) return
     try {
-      const online = await pingApi()
-      if (!online) {
-        setSqliteMode(false)
-        return
-      }
-      const data = await api<MockStore>('/api/store')
-      setStore(data)
-      setSqliteMode(true)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+      setStore(await fetchStore())
     } catch (err) {
       console.error(err)
-      setSqliteMode(false)
     }
   }, [])
 
   useEffect(() => {
-    if (USE_SQLITE) {
+    if (!isSupabaseConfigured()) return
+
+    void refreshStore()
+
+    let timer: number | undefined
+    const bump = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => void refreshStore(), 200)
+    }
+
+    const channel = supabase
+      .channel('panela-store')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vagas' }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidatos' }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, bump)
+      .subscribe()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
       void refreshStore()
-    } else {
-      setStore(loadStore())
+    })
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshStore()
+    }
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      window.clearTimeout(timer)
+      void supabase.removeChannel(channel)
+      subscription.unsubscribe()
+      document.removeEventListener('visibilitychange', onVis)
     }
   }, [refreshStore])
 
-  useEffect(() => {
-    if (!sqliteMode) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
-    }
-  }, [store, sqliteMode])
-
-  const resetStore = useCallback(() => {
-    if (sqliteMode) {
-      void refreshStore()
-      return
-    }
-    const fresh = createInitialStore()
-    setStore(fresh)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh))
-  }, [sqliteMode, refreshStore])
-
   const addVaga = useCallback(
-    (input: {
+    async (input: {
       unitId: string
       titulo: string
       descricao?: string
       localidade?: string
       tipo?: string
       ativa?: boolean
+      salario?: string
+      horario?: string
+      regime?: string
+      responsabilidades?: string
+      requisitos?: string
+      diferenciais?: string
+      beneficios?: string
     }) => {
-      const id = uid()
-      if (USE_SQLITE && sqliteMode) {
-        void api('/api/vagas', {
-          method: 'POST',
-          json: {
-            unit_id: input.unitId || UNIT_CENTRO,
-            titulo: input.titulo,
-            descricao: input.descricao,
-            localidade: input.localidade,
-            tipo: input.tipo,
-            ativa: input.ativa ?? true,
-          },
-        }).then(() => refreshStore())
-        return id
+      if (!input.unitId) throw new Error('Selecione uma unidade.')
+      const { data, error } = await supabase
+        .from('vagas')
+        .insert({
+          unit_id: input.unitId,
+          titulo: input.titulo,
+          descricao:
+            input.descricao ||
+            'Oportunidade no time Panela Velha. Candidate-se e faça parte da nossa cozinha.',
+          localidade: input.localidade || 'Presencial',
+          tipo: input.tipo || 'Presencial',
+          ativa: input.ativa ?? true,
+          salario: input.salario || null,
+          horario: input.horario || null,
+          regime: input.regime || 'CLT',
+          responsabilidades: input.responsabilidades || null,
+          requisitos: input.requisitos || null,
+          diferenciais: input.diferenciais || null,
+          beneficios: input.beneficios || null,
+        })
+        .select('*')
+        .single()
+
+      if (error || !data) {
+        throw new Error(error?.message || 'Não foi possível criar a vaga. Entre no painel com uma conta de RH.')
       }
-      setStore((prev) => ({
-        ...prev,
-        vagas: [
-          {
-            id,
-            unit_id: input.unitId || UNIT_CENTRO,
-            titulo: input.titulo,
-            descricao:
-              input.descricao ||
-              'Oportunidade no time Panela Velha. Candidate-se e faça parte da nossa cozinha.',
-            localidade: input.localidade || 'Presencial',
-            tipo: input.tipo || 'Presencial',
-            ativa: input.ativa ?? true,
-            criada_em: new Date().toISOString(),
-          },
-          ...prev.vagas,
-        ],
-      }))
-      return id
+
+      setStore((prev) => ({ ...prev, vagas: [data as Vaga, ...prev.vagas.filter((v) => v.id !== data.id)] }))
+      await refreshStore()
+      return data.id as string
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
   const updateVaga = useCallback(
     (
       vagaId: string,
-      patch: Partial<Pick<Vaga, 'titulo' | 'descricao' | 'localidade' | 'tipo' | 'ativa' | 'unit_id'>>,
+      patch: Partial<
+        Pick<
+          Vaga,
+          | 'titulo'
+          | 'descricao'
+          | 'localidade'
+          | 'tipo'
+          | 'ativa'
+          | 'unit_id'
+          | 'salario'
+          | 'horario'
+          | 'regime'
+          | 'responsabilidades'
+          | 'requisitos'
+          | 'diferenciais'
+          | 'beneficios'
+        >
+      >,
     ) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api(`/api/vagas/${vagaId}`, { method: 'PATCH', json: patch }).then(() => refreshStore())
-        return
-      }
-      setStore((prev) => ({
-        ...prev,
-        vagas: prev.vagas.map((v) => (v.id === vagaId ? { ...v, ...patch } : v)),
-      }))
+      void supabase
+        .from('vagas')
+        .update(patch)
+        .eq('id', vagaId)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
   const deleteVaga = useCallback(
     (vagaId: string) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api(`/api/vagas/${vagaId}`, { method: 'DELETE' }).then(() => refreshStore())
-        return
-      }
-      setStore((prev) => ({
-        ...prev,
-        vagas: prev.vagas.filter((v) => v.id !== vagaId),
-        candidatos: prev.candidatos.filter((c) => c.vaga_id !== vagaId),
-        messages: prev.messages.filter(
-          (m) => !prev.candidatos.some((c) => c.id === m.candidato_id && c.vaga_id === vagaId),
-        ),
-      }))
+      void supabase
+        .from('vagas')
+        .delete()
+        .eq('id', vagaId)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
   const updateCandidatoStatus = useCallback(
     (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api(`/api/candidatos/${candidatoId}/status`, {
-          method: 'PATCH',
-          json: { status, data_inicio_treinamento: dataInicio },
-        }).then(() => refreshStore())
-        return
-      }
-      setStore((prev) => ({
-        ...prev,
-        candidatos: prev.candidatos.map((c) =>
-          c.id === candidatoId
-            ? {
-                ...c,
-                status,
-                data_inicio_treinamento: status === 'aprovada' ? dataInicio || null : null,
-              }
-            : c,
-        ),
-      }))
+      void supabase
+        .from('candidatos')
+        .update({
+          status,
+          data_inicio_treinamento: status === 'aprovada' ? dataInicio || null : null,
+        })
+        .eq('id', candidatoId)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
-  const deleteCandidato = useCallback((candidatoId: string) => {
-    setStore((prev) => ({
-      ...prev,
-      candidatos: prev.candidatos.filter((c) => c.id !== candidatoId),
-      messages: prev.messages.filter((m) => m.candidato_id !== candidatoId),
-    }))
-  }, [])
+  const deleteCandidato = useCallback(
+    (candidatoId: string) => {
+      void supabase
+        .from('candidatos')
+        .delete()
+        .eq('id', candidatoId)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
+    },
+    [refreshStore],
+  )
 
   const upsertProfile = useCallback(
     (profile: Profile) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api('/api/profile', { method: 'PATCH', json: profile }).then(() => refreshStore())
-      }
+      void supabase
+        .from('profiles')
+        .update({
+          full_name: profile.full_name,
+          phone: profile.phone,
+          cpf: profile.cpf,
+          city: profile.city,
+          birth_date: profile.birth_date,
+          desired_role: profile.desired_role,
+          availability: profile.availability,
+          salary_expectation: profile.salary_expectation,
+          linkedin: profile.linkedin,
+          disc_d: profile.disc_d,
+          disc_i: profile.disc_i,
+          disc_s: profile.disc_s,
+          disc_c: profile.disc_c,
+          onboarding_completed: profile.onboarding_completed,
+          unit_id: profile.unit_id,
+          about_me: profile.about_me,
+          weekend_availability: profile.weekend_availability,
+          shifts: profile.shifts,
+          preferred_unit: profile.preferred_unit,
+          relevant_experience: profile.relevant_experience,
+          why_company: profile.why_company,
+          has_transport: profile.has_transport,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', profile.id)
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
+
       setStore((prev) => {
         const exists = prev.profiles.some((p) => p.id === profile.id)
         return {
@@ -243,17 +330,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
         }
       })
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
   const replaceExperiences = useCallback(
     (profileId: string, experiences: Experience[]) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api('/api/profile/experiences', {
-          method: 'PUT',
-          json: { experiences },
-        }).then(() => refreshStore())
-      }
+      void (async () => {
+        const { error: delErr } = await supabase.from('experiences').delete().eq('profile_id', profileId)
+        if (delErr) {
+          console.error(delErr.message)
+          return
+        }
+        const rows = experiences
+          .filter((e) => e.company.trim() && e.role_title.trim())
+          .map((e) => ({
+            profile_id: profileId,
+            company: e.company,
+            role_title: e.role_title,
+            start_date: e.start_date,
+            end_date: e.end_date,
+            description: e.description,
+          }))
+        if (rows.length) {
+          const { error } = await supabase.from('experiences').insert(rows)
+          if (error) console.error(error.message)
+        }
+        await refreshStore()
+      })()
+
       setStore((prev) => ({
         ...prev,
         experiences: [
@@ -262,7 +366,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         ],
       }))
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
   )
 
   const applyToVaga = useCallback(
@@ -274,113 +378,122 @@ export function DataProvider({ children }: { children: ReactNode }) {
       experiencia?: string | null
       info?: string | null
     }) => {
-      if (USE_SQLITE && sqliteMode) {
-        const exists = store.candidatos.some(
-          (c) => c.vaga_id === input.vagaId && c.profile_id === input.profile.id,
-        )
-        if (exists) return { error: 'Você já se candidatou a esta vaga.' }
+      const exists = store.candidatos.some(
+        (c) => c.vaga_id === input.vagaId && c.profile_id === input.profile.id,
+      )
+      if (exists) return { error: 'Você já se candidatou a esta vaga.' }
 
-        try {
-          await api('/api/profile', { method: 'PATCH', json: input.profile })
-          if (input.experiences) {
-            await api('/api/profile/experiences', {
-              method: 'PUT',
-              json: { experiences: input.experiences },
-            })
-          }
-          const created = await api<{ id: string }>('/api/candidaturas', {
-            method: 'POST',
-            json: {
-              vaga_id: input.vagaId,
-              nome: input.nome,
-              experiencia: input.experiencia,
-              info_complementar: input.info,
-            },
-          })
-          await refreshStore()
-          return { candidatoId: created.id }
-        } catch (e) {
-          return { error: e instanceof Error ? e.message : 'Erro ao candidatar' }
+      const { error: pErr } = await supabase
+        .from('profiles')
+        .update({
+          full_name: input.profile.full_name,
+          phone: input.profile.phone,
+          desired_role: input.profile.desired_role,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', input.profile.id)
+      if (pErr) return { error: pErr.message }
+
+      if (input.experiences?.length) {
+        await supabase.from('experiences').delete().eq('profile_id', input.profile.id)
+        const rows = input.experiences
+          .filter((e) => e.company.trim() && e.role_title.trim())
+          .map((e) => ({
+            profile_id: input.profile.id,
+            company: e.company,
+            role_title: e.role_title,
+            start_date: e.start_date,
+            end_date: e.end_date,
+            description: e.description,
+          }))
+        if (rows.length) {
+          const { error } = await supabase.from('experiences').insert(rows)
+          if (error) return { error: error.message }
         }
       }
 
-      let error: string | undefined
-      let candidatoId: string | undefined
+      const { data, error } = await supabase
+        .from('candidatos')
+        .insert({
+          vaga_id: input.vagaId,
+          profile_id: input.profile.id,
+          nome: input.nome || input.profile.full_name || input.profile.email || 'Candidato',
+          experiencia: input.experiencia || null,
+          info_complementar: input.info || null,
+          status: 'pendente',
+        })
+        .select('id')
+        .single()
 
-      setStore((prev) => {
-        const exists = prev.candidatos.some(
-          (c) => c.vaga_id === input.vagaId && c.profile_id === input.profile.id,
-        )
-        if (exists) {
-          error = 'Você já se candidatou a esta vaga.'
-          return prev
-        }
-
-        const profiles = prev.profiles.some((p) => p.id === input.profile.id)
-          ? prev.profiles.map((p) => (p.id === input.profile.id ? { ...p, ...input.profile } : p))
-          : [input.profile, ...prev.profiles]
-
-        const experiences = input.experiences
-          ? [
-              ...prev.experiences.filter((e) => e.profile_id !== input.profile.id),
-              ...input.experiences.map((e) => ({ ...e, profile_id: input.profile.id })),
-            ]
-          : prev.experiences
-
-        candidatoId = uid()
-        return {
-          ...prev,
-          profiles,
-          experiences,
-          candidatos: [
-            {
-              id: candidatoId,
-              vaga_id: input.vagaId,
-              profile_id: input.profile.id,
-              nome: input.nome || input.profile.full_name || input.profile.email || 'Candidato',
-              experiencia: input.experiencia || null,
-              info_complementar: input.info || null,
-              referencia: null,
-              status: 'pendente' as const,
-              data_inicio_treinamento: null,
-              curriculo_url: null,
-              curriculo_nome: null,
-              criado_em: new Date().toISOString(),
-            },
-            ...prev.candidatos,
-          ],
-        }
-      })
-      return { error, candidatoId }
+      if (error) return { error: error.message }
+      await refreshStore()
+      return { candidatoId: data.id }
     },
-    [sqliteMode, refreshStore, store.candidatos],
+    [refreshStore, store.candidatos],
   )
 
   const sendMessage = useCallback(
     (candidatoId: string, senderId: string, body: string) => {
-      if (USE_SQLITE && sqliteMode) {
-        void api('/api/messages', {
-          method: 'POST',
-          json: { candidato_id: candidatoId, body },
-        }).then(() => refreshStore())
-        return
+      void supabase
+        .from('messages')
+        .insert({ candidato_id: candidatoId, sender_id: senderId, body })
+        .then(({ error }) => {
+          if (error) console.error(error.message)
+          void refreshStore()
+        })
+    },
+    [refreshStore],
+  )
+
+  const addUnit = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('Informe o nome da unidade.')
+      const { data, error } = await supabase.from('units').insert({ name: trimmed }).select('*').single()
+      if (error || !data) {
+        if (error?.code === '23505') throw new Error('Já existe uma unidade com esse nome.')
+        throw new Error(error?.message || 'Não foi possível criar a unidade.')
       }
       setStore((prev) => ({
         ...prev,
-        messages: [
-          {
-            id: uid(),
-            candidato_id: candidatoId,
-            sender_id: senderId,
-            body,
-            created_at: new Date().toISOString(),
-            read_at: null,
-          },
-          ...prev.messages,
-        ],
+        units: [...prev.units, data as Unit].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
       }))
+      await refreshStore()
+      return data.id as string
     },
-    [sqliteMode, refreshStore],
+    [refreshStore],
+  )
+
+  const updateUnit = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('Informe o nome da unidade.')
+      const { error } = await supabase.from('units').update({ name: trimmed }).eq('id', id)
+      if (error) {
+        if (error.code === '23505') throw new Error('Já existe uma unidade com esse nome.')
+        throw new Error(error.message)
+      }
+      setStore((prev) => ({
+        ...prev,
+        units: prev.units.map((u) => (u.id === id ? { ...u, name: trimmed } : u)),
+      }))
+      await refreshStore()
+    },
+    [refreshStore],
+  )
+
+  const deleteUnit = useCallback(
+    async (id: string) => {
+      const { error } = await supabase.from('units').delete().eq('id', id)
+      if (error) throw new Error(error.message)
+      setStore((prev) => ({
+        ...prev,
+        units: prev.units.filter((u) => u.id !== id),
+        vagas: prev.vagas.filter((v) => v.unit_id !== id),
+      }))
+      await refreshStore()
+    },
+    [refreshStore],
   )
 
   const getVaga = useCallback(
@@ -409,9 +522,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       store,
-      sqliteMode,
       refreshStore,
-      resetStore,
       addVaga,
       updateVaga,
       deleteVaga,
@@ -421,15 +532,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
       replaceExperiences,
       applyToVaga,
       sendMessage,
+      addUnit,
+      updateUnit,
+      deleteUnit,
       getVaga,
       getCandidatosByVaga,
       getMessagesForProfile,
     }),
     [
       store,
-      sqliteMode,
       refreshStore,
-      resetStore,
       addVaga,
       updateVaga,
       deleteVaga,
@@ -442,6 +554,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       getVaga,
       getCandidatosByVaga,
       getMessagesForProfile,
+      addUnit,
+      updateUnit,
+      deleteUnit,
     ],
   )
 

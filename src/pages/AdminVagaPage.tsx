@@ -13,14 +13,16 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { ArrowLeft, MessageSquare, Trash2, X, UserRound } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Trash2, X, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { DISC_LABELS } from '@/lib/disc'
 import { formatDateBR } from '@/lib/utils'
+import { openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import type { Candidato, CandidateStatus, Experience, Profile } from '@/types'
 import { PIPELINE_ORDER, STATUS_META } from '@/types'
-import { Button, Field, Input, StatusPill, Textarea } from '@/components/ui'
+import { Alert, Button, Field, Input, StatusPill, Textarea } from '@/components/ui'
+import { ProfileAnswers } from '@/components/ProfileAnswers'
 
 type CandFull = Omit<Candidato, 'profile'> & { profile?: Profile | null; experiences?: Experience[] }
 
@@ -44,6 +46,7 @@ export function AdminVagaPage() {
   const [selected, setSelected] = useState<CandFull | null>(null)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [notifyBody, setNotifyBody] = useState('')
+  const [notifyError, setNotifyError] = useState('')
   const [trainingDate, setTrainingDate] = useState('')
   const [pendingStatus, setPendingStatus] = useState<{ id: string; status: CandidateStatus } | null>(null)
 
@@ -67,8 +70,15 @@ export function AdminVagaPage() {
   if (!isStaff) return <Navigate to="/auth?redirect=/admin" replace />
   if (!vaga) {
     return (
-      <div className="p-10 text-[var(--pv-cream)]">
-        Vaga não encontrada · <Link to="/admin/quadro">Voltar</Link>
+      <div className="px-5 py-16 sm:px-8">
+        <p className="font-display text-2xl text-[#F7F4EC]">Vaga não encontrada</p>
+        <p className="mt-2 text-sm text-[var(--pv-cream)]/70">Ela pode ter sido removida.</p>
+        <Link
+          to="/admin/quadro"
+          className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--pv-terracotta)]"
+        >
+          <ArrowLeft size={14} /> Voltar ao quadro
+        </Link>
       </div>
     )
   }
@@ -98,8 +108,13 @@ export function AdminVagaPage() {
     }
     updateCandidatoStatus(candId, nextStatus)
     setSelected({ ...cand, status: nextStatus })
+    setNotifyError('')
     setNotifyBody(
-      `Olá ${cand.nome}! Você avançou para a etapa "${STATUS_META[nextStatus].label}" na vaga ${vagaTitle}. Em breve entraremos em contato.`,
+      whatsAppMessageForStatus({
+        nome: cand.nome,
+        vaga: vagaTitle,
+        status: nextStatus,
+      }),
     )
     setNotifyOpen(true)
   }
@@ -109,16 +124,19 @@ export function AdminVagaPage() {
   return (
     <div>
       <header className="border-b border-white/10 px-5 py-5 sm:px-8">
-        <Link to="/admin/quadro" className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--pv-cream)]/75">
+        <Link
+          to="/admin/quadro"
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--pv-cream)]/75 transition hover:text-[var(--pv-cream)]"
+        >
           <ArrowLeft size={14} /> Quadro
         </Link>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[1.2px] text-[var(--pv-terracotta)]">
-          {vagaUnitName}
-        </p>
+        <p className="pv-eyebrow mt-3">{vagaUnitName}</p>
         <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="font-display text-2xl text-[#F7F4EC] sm:text-3xl">{vagaTitle}</h1>
-            <p className="mt-1 text-sm text-[var(--pv-cream)]/70">{cands.length} candidato(s) no pipeline</p>
+            <p className="mt-1 text-sm pv-cream-text">
+              {cands.length} candidato{cands.length === 1 ? '' : 's'} no pipeline · arraste entre colunas
+            </p>
           </div>
           <Button
             variant="outline"
@@ -183,40 +201,20 @@ export function AdminVagaPage() {
               <h3 className="mb-2 flex items-center gap-2 font-bold text-[var(--pv-navy)]">
                 <UserRound size={15} /> Dados
               </h3>
-              <div className="space-y-1.5 rounded-xl border border-[#E7E2D3] bg-white p-3 text-[#4A4636]">
-                <p>E-mail: {selected.profile?.email || '—'}</p>
-                <p>Telefone: {selected.profile?.phone || '—'}</p>
-                <p>Cidade: {selected.profile?.city || '—'}</p>
-                <p>Disponibilidade: {selected.profile?.availability || '—'}</p>
-                {selected.data_inicio_treinamento ? (
-                  <p>Início treinamento: {formatDateBR(selected.data_inicio_treinamento)}</p>
-                ) : null}
-              </div>
+              <ProfileAnswers profile={selected.profile} />
+              {selected.data_inicio_treinamento ? (
+                <p className="mt-2 text-[#4A4636]">
+                  Início treinamento: {formatDateBR(selected.data_inicio_treinamento)}
+                </p>
+              ) : null}
             </section>
 
-            <section>
-              <h3 className="mb-2 font-bold text-[var(--pv-navy)]">Experiências</h3>
-              {(selected.experiences?.length || 0) === 0 && !selected.experiencia ? (
-                <p className="italic text-[#A9A493]">Sem experiências</p>
-              ) : (
-                <div className="space-y-2">
-                  {selected.experiences?.map((e) => (
-                    <div key={e.id} className="rounded-xl border border-[#E7E2D3] bg-white p-3">
-                      <p className="font-semibold text-[var(--pv-navy)]">
-                        {e.role_title} · {e.company}
-                      </p>
-                      <p className="text-xs text-[#6B664F]">
-                        {e.start_date} — {e.end_date}
-                      </p>
-                      {e.description ? <p className="mt-1">{e.description}</p> : null}
-                    </div>
-                  ))}
-                  {selected.experiencia ? (
-                    <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
-                  ) : null}
-                </div>
-              )}
-            </section>
+            {selected.experiencia && !selected.profile?.relevant_experience ? (
+              <section>
+                <h3 className="mb-2 font-bold text-[var(--pv-navy)]">Experiência</h3>
+                <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
+              </section>
+            ) : null}
 
             <section>
               <h3 className="mb-2 font-bold text-[var(--pv-navy)]">DISC</h3>
@@ -250,13 +248,19 @@ export function AdminVagaPage() {
             <Button
               className="w-full"
               onClick={() => {
+                setNotifyError('')
                 setNotifyBody(
-                  `Olá ${selected.nome}! Atualização sobre a vaga ${vagaTitle}: você está na etapa "${STATUS_META[selected.status].label}".`,
+                  whatsAppMessageForStatus({
+                    nome: selected.nome,
+                    vaga: vagaTitle,
+                    status: selected.status,
+                    trainingDate: selected.data_inicio_treinamento,
+                  }),
                 )
                 setNotifyOpen(true)
               }}
             >
-              <MessageSquare size={15} /> Notificar candidato
+              <MessageCircle size={15} /> Enviar WhatsApp
             </Button>
           </div>
         </aside>
@@ -265,24 +269,37 @@ export function AdminVagaPage() {
       {notifyOpen && selected && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(14,23,48,0.55)] p-5">
           <div className="w-full max-w-md rounded-2xl bg-[#FBF9F3] p-5 shadow-2xl">
-            <h3 className="font-display text-xl text-[var(--pv-navy)]">Enviar mensagem</h3>
+            <h3 className="font-display text-xl text-[var(--pv-navy)]">Enviar no WhatsApp</h3>
+            <p className="mt-1 text-sm text-[var(--pv-muted)]">
+              A mensagem abre no WhatsApp com o número do candidato.
+            </p>
             <div className="mt-4">
               <Field label="Mensagem">
                 <Textarea value={notifyBody} onChange={(e) => setNotifyBody(e.target.value)} rows={5} />
               </Field>
             </div>
+            {notifyError ? (
+              <div className="mt-3">
+                <Alert tone="error">{notifyError}</Alert>
+              </div>
+            ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setNotifyOpen(false)}>
                 Cancelar
               </Button>
               <Button
                 onClick={() => {
-                  if (!user || !notifyBody.trim()) return
-                  sendMessage(selected.id, user.id, notifyBody.trim())
+                  if (!notifyBody.trim()) return
+                  const sent = openWhatsAppChat(selected.profile?.phone, notifyBody.trim())
+                  if (sent.error) {
+                    setNotifyError(sent.error)
+                    return
+                  }
+                  if (user) sendMessage(selected.id, user.id, notifyBody.trim())
                   setNotifyOpen(false)
                 }}
               >
-                Enviar
+                <MessageCircle size={15} /> Abrir WhatsApp
               </Button>
             </div>
           </div>
@@ -309,10 +326,14 @@ export function AdminVagaPage() {
                   setPendingStatus(null)
                   if (cand) {
                     setSelected({ ...cand, status: 'aprovada' })
+                    setNotifyError('')
                     setNotifyBody(
-                      `Olá ${cand.nome}! Parabéns — você foi aprovado(a) na vaga ${vagaTitle}${
-                        trainingDate ? `. Início: ${formatDateBR(trainingDate)}` : ''
-                      }.`,
+                      whatsAppMessageForStatus({
+                        nome: cand.nome,
+                        vaga: vagaTitle,
+                        status: 'aprovada',
+                        trainingDate: trainingDate || null,
+                      }),
                     )
                     setNotifyOpen(true)
                   }

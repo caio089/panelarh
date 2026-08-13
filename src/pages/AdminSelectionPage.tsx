@@ -1,26 +1,24 @@
-import { useMemo, useState } from 'react'
-import { Brain, MessageCircle, Sparkles, UserRound, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Brain, MessageCircle, Sparkles, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import {
-  DEFAULT_WHATSAPP_MSG,
-  buildWhatsAppUrl,
-  scoreCandidateForVaga,
-} from '@/lib/aiSelection'
-import { DISC_LABELS } from '@/lib/disc'
-import { Button, Field, Input, Select, StatusPill, Textarea } from '@/components/ui'
-import { STATUS_META, type Candidato, type Profile } from '@/types'
+import { scoreCandidateForVaga, explainSelection } from '@/lib/aiSelection'
+import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat } from '@/lib/whatsapp'
+import { Button, Field, Input, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
+import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
+import { STATUS_META, type Candidato, type Profile, type Vaga } from '@/types'
 
 type Ranked = {
   candidato: Candidato
   profile?: Profile | null
+  vaga: Vaga
   score: number
   reasons: string[]
 }
 
 export function AdminSelectionPage() {
-  const { isAdmin, profile: authProfile } = useAuth()
-  const { store, updateCandidatoStatus } = useData()
+  const { isAdmin, profile: authProfile, user } = useAuth()
+  const { store, updateCandidatoStatus, sendMessage } = useData()
 
   const units = useMemo(() => {
     if (isAdmin) return store.units
@@ -30,13 +28,20 @@ export function AdminSelectionPage() {
 
   const [unitId, setUnitId] = useState(units[0]?.id || '')
   const [vagaId, setVagaId] = useState('')
-  const [pool, setPool] = useState<Ranked[]>([])
+  const [cut, setCut] = useState<Ranked[] | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [askCount, setAskCount] = useState('10')
+  const [askCount, setAskCount] = useState('3')
   const [analyzing, setAnalyzing] = useState(false)
   const [round, setRound] = useState(0)
-  const [detail, setDetail] = useState<Ranked | null>(null)
+  const [detail, setDetail] = useState<CandidateDetailData | null>(null)
   const [waMsg, setWaMsg] = useState(DEFAULT_WHATSAPP_MSG)
+  const [aiWhy, setAiWhy] = useState<{ headline: string; summary: string; picks: string[] } | null>(
+    null,
+  )
+
+  useEffect(() => {
+    if (!unitId && units[0]?.id) setUnitId(units[0].id)
+  }, [units, unitId])
 
   const vagas = store.vagas.filter((v) => v.unit_id === unitId)
   const vaga = store.vagas.find((v) => v.id === vagaId)
@@ -49,41 +54,65 @@ export function AdminSelectionPage() {
         const p = store.profiles.find((x) => x.id === c.profile_id) || null
         const exps = store.experiences.filter((e) => e.profile_id === c.profile_id).length
         const { score, reasons } = scoreCandidateForVaga(c, vaga, p, exps)
-        return { candidato: c, profile: p, score, reasons }
+        return { candidato: c, profile: p, vaga, score, reasons }
       })
       .sort((a, b) => b.score - a.score)
   }, [store, vaga])
 
+  // Lista classificada: corte da IA ou ranking completo da vaga
+  const displayed = cut ?? allForVaga
+
   function onPickUnit(id: string) {
     setUnitId(id)
     setVagaId('')
-    setPool([])
+    setCut(null)
     setSelectedIds([])
     setRound(0)
+    setAiWhy(null)
   }
 
   function onPickVaga(id: string) {
     setVagaId(id)
-    setPool([])
+    setCut(null)
     setSelectedIds([])
     setRound(0)
+    setAiWhy(null)
   }
+
+  const requestedCount = Math.max(1, Math.min(50, Number(askCount) || 3))
 
   function runAiCut(count: number, fromList?: Ranked[]) {
     const source = fromList || allForVaga
     if (!source.length) return
+    const take = Math.min(Math.max(1, count), source.length)
     setAnalyzing(true)
     window.setTimeout(() => {
-      const next = source.slice(0, Math.min(count, source.length))
-      setPool(next)
+      const next = source.slice(0, take)
+      const leftover = source[take] || null
+      setCut(next)
       setSelectedIds(next.map((n) => n.candidato.id))
       setRound((r) => r + 1)
+      setAiWhy(
+        explainSelection({
+          vagaTitle: source[0]?.vaga.titulo || vaga?.titulo || '',
+          requested: count,
+          poolSize: source.length,
+          selected: next.map((item) => ({
+            nome: item.candidato.nome,
+            score: item.score,
+            reasons: item.reasons,
+          })),
+          nextOut: leftover
+            ? { nome: leftover.candidato.nome, score: leftover.score, reasons: leftover.reasons }
+            : null,
+        }),
+      )
       setAnalyzing(false)
     }, 900)
   }
 
   function refineFromSelected(count: number) {
-    const current = pool.filter((p) => selectedIds.includes(p.candidato.id))
+    const current = displayed.filter((p) => selectedIds.includes(p.candidato.id))
     runAiCut(count, current.sort((a, b) => b.score - a.score))
   }
 
@@ -91,24 +120,42 @@ export function AdminSelectionPage() {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
-  const winner = pool.length === 1 ? pool[0] : selectedIds.length === 1
-    ? pool.find((p) => p.candidato.id === selectedIds[0])
-    : null
+  function notifyWhatsApp(candidatoId: string, phone: string | null | undefined, body: string) {
+    const sent = openWhatsAppChat(phone, body)
+    if (sent.error) {
+      window.alert(sent.error)
+      return
+    }
+    if (user) sendMessage(candidatoId, user.id, body)
+  }
+
+  function openDetail(item: Ranked) {
+    const unit = store.units.find((u) => u.id === item.vaga.unit_id)
+    setDetail({
+      candidato: item.candidato,
+      profile: item.profile,
+      experiences: store.experiences.filter((e) => e.profile_id === item.candidato.profile_id),
+      vaga: item.vaga,
+      unitName: unit?.name,
+      score: item.score,
+      reasons: item.reasons,
+    })
+  }
+
+  const winner =
+    displayed.length === 1
+      ? displayed[0]
+      : selectedIds.length === 1
+        ? displayed.find((p) => p.candidato.id === selectedIds[0])
+        : null
 
   return (
     <div className="px-5 py-6 sm:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[var(--pv-terracotta)]">
-            Panela AI
-          </p>
-          <h1 className="font-display text-3xl text-[#F7F4EC]">Seleção inteligente</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--pv-cream)]/70">
-            Escolha unidade e vaga. A IA lê o que a vaga pede, ranqueia os candidatos e você
-            afina até chegar na pessoa certa — com WhatsApp pronto.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Panela AI"
+        title="Seleção inteligente"
+        description="Diga quantas pessoas você quer. A IA escolhe e explica por que esses nomes avançaram."
+      />
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-br from-[#1B2A57] to-[#121D40] p-5 sm:p-6">
         <div className="flex items-center gap-2 text-[var(--pv-cream)]">
@@ -116,7 +163,7 @@ export function AdminSelectionPage() {
           <span className="text-sm font-bold">Configurar seleção</span>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Field label="Unidade" labelClassName="text-[var(--pv-cream)]/80">
+          <Field label="Unidade" labelClassName="text-[#EFE3C4]">
             <Select value={unitId} onChange={(e) => onPickUnit(e.target.value)}>
               {units.map((u) => (
                 <option key={u.id} value={u.id}>
@@ -125,7 +172,7 @@ export function AdminSelectionPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Vaga" labelClassName="text-[var(--pv-cream)]/80">
+          <Field label="Vaga" labelClassName="text-[#EFE3C4]">
             <Select value={vagaId} onChange={(e) => onPickVaga(e.target.value)}>
               <option value="">Escolha a vaga</option>
               {vagas.map((v) => (
@@ -135,26 +182,28 @@ export function AdminSelectionPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Quantas pessoas classificar?" labelClassName="text-[var(--pv-cream)]/80">
+          <Field label="Quantas pessoas selecionar?" labelClassName="text-[#EFE3C4]">
             <Input
               type="number"
               min={1}
               max={50}
               value={askCount}
               onChange={(e) => setAskCount(e.target.value)}
+              placeholder="3"
             />
           </Field>
         </div>
 
         {vaga ? (
-          <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-[var(--pv-cream)]/85">
+          <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-[#EFE3C4]">
             <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--pv-terracotta)]">
               O que a vaga pede
             </p>
-            <p className="mt-1 font-semibold text-[#F7F4EC]">{vaga.titulo}</p>
+            <p className="mt-1 font-semibold text-white">{vaga.titulo}</p>
             <p className="mt-2 leading-relaxed">{vaga.descricao}</p>
-            <p className="mt-3 text-xs text-[var(--pv-cream)]/60">
-              {allForVaga.length} candidatos elegíveis nesta vaga
+            <p className="mt-3 text-xs text-[#EFE3C4]/80">
+              {allForVaga.length} candidato{allForVaga.length === 1 ? '' : 's'} classificado
+              {allForVaga.length === 1 ? '' : 's'} nesta vaga
             </p>
           </div>
         ) : null}
@@ -162,12 +211,14 @@ export function AdminSelectionPage() {
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
             disabled={!vagaId || analyzing || allForVaga.length === 0}
-            onClick={() => runAiCut(Number(askCount) || 10)}
+            onClick={() => runAiCut(requestedCount)}
           >
             <Sparkles size={15} />
-            {analyzing ? 'IA analisando perfis…' : `Classificar top ${askCount || 10}`}
+            {analyzing
+              ? 'IA analisando perfis…'
+              : `Selecionar ${requestedCount} com IA`}
           </Button>
-          {pool.length > 1 && (
+          {displayed.length > 1 && cut ? (
             <>
               <Button
                 variant="cream"
@@ -191,12 +242,52 @@ export function AdminSelectionPage() {
                 Escolher a #1
               </Button>
             </>
-          )}
+          ) : null}
         </div>
         {round > 0 ? (
-          <p className="mt-3 text-xs text-[var(--pv-cream)]/55">Rodada de seleção #{round}</p>
+          <p className="mt-3 text-xs text-[#EFE3C4]/70">Rodada de seleção #{round}</p>
         ) : null}
       </section>
+
+      {!vagaId ? (
+        <section className="mt-6">
+          <h2 className="font-display text-xl text-[#F7F4EC]">Vagas desta unidade</h2>
+          <p className="mt-1 text-sm text-[#EFE3C4]">
+            Clique na vaga para ver os candidatos já classificados — sem despejar tudo de uma vez.
+          </p>
+          {vagas.length === 0 ? (
+            <p className="mt-6 rounded-2xl border border-dashed border-white/20 px-6 py-12 text-center text-[#EFE3C4]">
+              Nenhuma vaga nesta unidade.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {vagas.map((v) => {
+                const count = store.candidatos.filter(
+                  (c) => c.vaga_id === v.id && c.status !== 'reprovada',
+                ).length
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => onPickVaga(v.id)}
+                    className="rounded-2xl bg-[#FBF9F3] p-4 text-left shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
+                  >
+                    <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
+                      {count} candidato{count === 1 ? '' : 's'}
+                    </p>
+                    <h3 className="mt-1 font-display text-lg leading-snug text-[var(--pv-ink)]">
+                      {v.titulo}
+                    </h3>
+                    <p className="mt-1 line-clamp-2 text-sm text-[var(--pv-muted)]">
+                      {v.descricao || v.localidade || 'Sem descrição'}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {analyzing ? (
         <div className="mt-8 flex flex-col items-center justify-center gap-3 py-16 text-[var(--pv-cream)]">
@@ -207,28 +298,49 @@ export function AdminSelectionPage() {
         </div>
       ) : null}
 
-      {!analyzing && pool.length > 0 ? (
+      {!analyzing && vagaId && displayed.length > 0 ? (
         <section className="mt-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display text-xl text-[#F7F4EC]">
-              Rankeados · {pool.length} pessoa{pool.length === 1 ? '' : 's'}
+              {cut
+                ? `Selecionados pela IA · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`
+                : `Classificados · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`}
             </h2>
             {winner ? (
               <span className="rounded-full bg-[#E4F3E9] px-3 py-1 text-xs font-bold text-[#2F7D4F]">
                 Finalista selecionado
               </span>
             ) : (
-              <span className="text-xs text-[var(--pv-cream)]/60">
-                Marque quem permanece e refine com a IA
+              <span className="text-xs text-[#EFE3C4]">
+                Clique no card para ver o perfil · marque quem permanece para afinar
               </span>
             )}
           </div>
 
+          {aiWhy ? (
+            <article className="mb-5 rounded-2xl border border-[rgba(225,91,63,0.35)] bg-[#FBF9F3] p-5 shadow-xl">
+              <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
+                <Sparkles size={14} /> {aiWhy.headline}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--pv-ink)]">{aiWhy.summary}</p>
+              <ul className="mt-3 space-y-2 text-sm text-[#4A4636]">
+                {aiWhy.picks.map((line) => (
+                  <li key={line} className="rounded-xl bg-[#F1EDE0] px-3 py-2 leading-relaxed">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ) : vagaId && !cut ? (
+            <p className="mb-4 text-sm text-[#EFE3C4]">
+              Informe quantas pessoas você quer e clique em Selecionar com IA — ela explica o corte.
+            </p>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {pool.map((item, idx) => {
+            {displayed.map((item, idx) => {
               const checked = selectedIds.includes(item.candidato.id)
               const phone = item.profile?.phone
-              const wa = phone ? buildWhatsAppUrl(phone, waMsg) : null
               return (
                 <article
                   key={item.candidato.id}
@@ -237,16 +349,20 @@ export function AdminSelectionPage() {
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <label className="mt-1">
+                    <label className="mt-1" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleSelect(item.candidato.id)}
                       />
                     </label>
-                    <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => openDetail(item)}
+                    >
                       <div className="flex items-center justify-between gap-2">
-                        <p className="font-bold text-[var(--pv-navy)]">
+                        <p className="font-bold text-[var(--pv-ink)]">
                           #{idx + 1} {item.candidato.nome}
                         </p>
                         <span className="font-display text-lg text-[var(--pv-terracotta)]">
@@ -260,28 +376,29 @@ export function AdminSelectionPage() {
                           bg={STATUS_META[item.candidato.status].bg}
                         />
                       </div>
-                      <ul className="mt-3 space-y-1 text-xs text-[#6B664F]">
-                        {item.reasons.map((r) => (
+                      <ul className="mt-3 space-y-1 text-xs text-[var(--pv-muted)]">
+                        {(cut ? item.reasons : item.reasons.slice(0, 2)).map((r) => (
                           <li key={r}>• {r}</li>
                         ))}
                       </ul>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
-                          <UserRound size={14} /> Ver perfil
-                        </Button>
-                        {wa ? (
-                          <a href={wa} target="_blank" rel="noreferrer">
-                            <Button size="sm">
-                              <MessageCircle size={14} /> WhatsApp
-                            </Button>
-                          </a>
-                        ) : (
-                          <Button size="sm" variant="ghost" disabled title="Sem telefone">
-                            <MessageCircle size={14} /> Sem telefone
-                          </Button>
-                        )}
-                      </div>
-                    </div>
+                    </button>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
+                      <UserRound size={14} /> Ver perfil
+                    </Button>
+                    {phone ? (
+                      <Button
+                        size="sm"
+                        onClick={() => notifyWhatsApp(item.candidato.id, phone, waMsg)}
+                      >
+                        <MessageCircle size={14} /> WhatsApp
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" disabled title="Sem telefone">
+                        <MessageCircle size={14} /> Sem telefone
+                      </Button>
+                    )}
                   </div>
                 </article>
               )
@@ -289,8 +406,8 @@ export function AdminSelectionPage() {
           </div>
 
           <div className="mt-6 rounded-2xl bg-[#FBF9F3] p-5 shadow-xl">
-            <h3 className="font-display text-lg text-[var(--pv-navy)]">Mensagem padrão WhatsApp</h3>
-            <p className="mt-1 text-sm text-[#6B664F]">
+            <h3 className="font-display text-lg text-[var(--pv-ink)]">Mensagem padrão WhatsApp</h3>
+            <p className="mt-1 text-sm text-[var(--pv-muted)]">
               Ao clicar no WhatsApp, abre conversa com o texto pronto.
             </p>
             <div className="mt-3">
@@ -300,15 +417,15 @@ export function AdminSelectionPage() {
               <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#E4F3E9] bg-[#E4F3E9]/50 p-4">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-[#2F7D4F]">Escolhido: {winner.candidato.nome}</p>
-                  <p className="text-xs text-[#6B664F]">Match {winner.score}% · pode avançar no pipeline</p>
+                  <p className="text-xs text-[var(--pv-muted)]">
+                    Match {winner.score}% · pode avançar no pipeline
+                  </p>
                 </div>
                 <Button
                   size="sm"
                   onClick={() => {
                     updateCandidatoStatus(winner.candidato.id, 'entrevista')
-                    const phone = winner.profile?.phone
-                    const url = phone ? buildWhatsAppUrl(phone, waMsg) : null
-                    if (url) window.open(url, '_blank')
+                    notifyWhatsApp(winner.candidato.id, winner.profile?.phone, waMsg)
                   }}
                 >
                   Avançar + WhatsApp
@@ -319,81 +436,20 @@ export function AdminSelectionPage() {
         </section>
       ) : null}
 
-      {!analyzing && vagaId && pool.length === 0 ? (
-        <div className="mt-10 rounded-2xl border border-dashed border-white/20 px-6 py-14 text-center text-[var(--pv-cream)]/70">
+      {!analyzing && vagaId && displayed.length === 0 ? (
+        <div className="mt-10 rounded-2xl border border-dashed border-white/20 px-6 py-14 text-center text-[#EFE3C4]">
           <Sparkles className="mx-auto mb-3 text-[var(--pv-terracotta)]" />
-          <p className="font-display text-lg text-[#F7F4EC]">Pronto para classificar</p>
-          <p className="mt-2 text-sm">
-            Defina quantas pessoas quer no primeiro corte e rode a IA.
-          </p>
+          <p className="font-display text-lg text-white">Nenhum candidato nesta vaga</p>
+          <p className="mt-2 text-sm">Quando houver candidaturas, elas aparecem classificadas aqui.</p>
         </div>
       ) : null}
 
-      {detail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(14,23,48,0.55)] p-5">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-[#FBF9F3] p-5 shadow-2xl">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
-                  Match {detail.score}%
-                </p>
-                <h3 className="font-display text-xl text-[var(--pv-navy)]">{detail.candidato.nome}</h3>
-              </div>
-              <button type="button" className="rounded-lg p-2 hover:bg-[#F1EDE0]" onClick={() => setDetail(null)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="mt-4 space-y-2 text-sm text-[#4A4636]">
-              <p>E-mail: {detail.profile?.email || '—'}</p>
-              <p>Telefone: {detail.profile?.phone || '—'}</p>
-              <p>Cidade: {detail.profile?.city || '—'}</p>
-              <p>Disponibilidade: {detail.profile?.availability || '—'}</p>
-              <p>Cargo desejado: {detail.profile?.desired_role || '—'}</p>
-            </div>
-            {detail.profile?.disc_d != null ? (
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {(['D', 'I', 'S', 'C'] as const).map((d) => {
-                  const val =
-                    d === 'D'
-                      ? detail.profile?.disc_d
-                      : d === 'I'
-                        ? detail.profile?.disc_i
-                        : d === 'S'
-                          ? detail.profile?.disc_s
-                          : detail.profile?.disc_c
-                  return (
-                    <div key={d} className="rounded-xl bg-[var(--pv-navy)] px-3 py-3 text-[var(--pv-cream)]">
-                      <div className="text-[11px] opacity-80">{DISC_LABELS[d]}</div>
-                      <div className="font-display text-xl">{Number(val || 0)}%</div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : null}
-            <ul className="mt-4 space-y-1 text-sm text-[#6B664F]">
-              {detail.reasons.map((r) => (
-                <li key={r}>• {r}</li>
-              ))}
-            </ul>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {detail.profile?.phone && buildWhatsAppUrl(detail.profile.phone, waMsg) ? (
-                <a
-                  href={buildWhatsAppUrl(detail.profile.phone, waMsg)!}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Button>
-                    <MessageCircle size={14} /> WhatsApp
-                  </Button>
-                </a>
-              ) : null}
-              <Button variant="ghost" onClick={() => setDetail(null)}>
-                Fechar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CandidateDetailModal
+        open={Boolean(detail)}
+        data={detail}
+        onClose={() => setDetail(null)}
+        waMsg={waMsg}
+      />
     </div>
   )
 }

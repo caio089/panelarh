@@ -1,10 +1,13 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { countByStatus } from '@/lib/mockData'
-import { Button, Field, Input, Select, StatusPill, Textarea } from '@/components/ui'
+import { countByStatus } from '@/lib/data'
+import { generateVagaDraft } from '@/lib/aiVaga'
+import { Alert, Button, Field, Input, Modal, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
+import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
+import { EmptyState } from '@/components/Layout'
 import { STATUS_META, type CandidateStatus, type Vaga } from '@/types'
 import { formatDateBR } from '@/lib/utils'
 
@@ -15,6 +18,13 @@ type VagaForm = {
   localidade: string
   tipo: string
   ativa: boolean
+  salario: string
+  horario: string
+  regime: string
+  responsabilidades: string
+  requisitos: string
+  diferenciais: string
+  beneficios: string
 }
 
 const emptyForm = (unitId = ''): VagaForm => ({
@@ -24,6 +34,13 @@ const emptyForm = (unitId = ''): VagaForm => ({
   localidade: '',
   tipo: 'Presencial',
   ativa: true,
+  salario: '',
+  horario: '',
+  regime: 'CLT',
+  responsabilidades: '',
+  requisitos: '',
+  diferenciais: '',
+  beneficios: '',
 })
 
 export function AdminVagasListPage() {
@@ -41,8 +58,11 @@ export function AdminVagasListPage() {
   const [editing, setEditing] = useState<Vaga | null>(null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<VagaForm>(emptyForm())
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   function openCreate() {
+    setFormError('')
     setCreating(true)
     setEditing(null)
     setForm(emptyForm(units[0]?.id || ''))
@@ -60,32 +80,58 @@ export function AdminVagasListPage() {
       localidade: vaga.localidade || '',
       tipo: vaga.tipo || 'Presencial',
       ativa: vaga.ativa ?? true,
+      salario: vaga.salario || '',
+      horario: vaga.horario || '',
+      regime: vaga.regime || 'CLT',
+      responsabilidades: vaga.responsabilidades || '',
+      requisitos: vaga.requisitos || '',
+      diferenciais: vaga.diferenciais || '',
+      beneficios: vaga.beneficios || '',
     })
   }
 
-  function saveForm() {
+  async function saveForm() {
     if (!form.titulo.trim() || !form.unitId) return
-    if (editing) {
-      updateVaga(editing.id, {
-        unit_id: form.unitId,
-        titulo: form.titulo.trim(),
-        descricao: form.descricao.trim(),
-        localidade: form.localidade.trim(),
-        tipo: form.tipo,
-        ativa: form.ativa,
-      })
-    } else {
-      addVaga({
-        unitId: form.unitId,
-        titulo: form.titulo.trim(),
-        descricao: form.descricao.trim(),
-        localidade: form.localidade.trim(),
-        tipo: form.tipo,
-        ativa: form.ativa,
-      })
+    const details = {
+      salario: form.salario.trim(),
+      horario: form.horario.trim(),
+      regime: form.regime.trim() || 'CLT',
+      responsabilidades: form.responsabilidades.trim(),
+      requisitos: form.requisitos.trim(),
+      diferenciais: form.diferenciais.trim(),
+      beneficios: form.beneficios.trim(),
     }
-    setCreating(false)
-    setEditing(null)
+    setSaving(true)
+    setFormError('')
+    try {
+      if (editing) {
+        updateVaga(editing.id, {
+          unit_id: form.unitId,
+          titulo: form.titulo.trim(),
+          descricao: form.descricao.trim(),
+          localidade: form.localidade.trim(),
+          tipo: form.tipo,
+          ativa: form.ativa,
+          ...details,
+        })
+      } else {
+        await addVaga({
+          unitId: form.unitId,
+          titulo: form.titulo.trim(),
+          descricao: form.descricao.trim(),
+          localidade: form.localidade.trim(),
+          tipo: form.tipo,
+          ativa: form.ativa,
+          ...details,
+        })
+      }
+      setCreating(false)
+      setEditing(null)
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar a vaga.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function removeVaga(vaga: Vaga, e?: MouseEvent) {
@@ -97,91 +143,134 @@ export function AdminVagasListPage() {
 
   return (
     <div className="px-5 py-6 sm:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl text-[#F7F4EC]">Vagas</h1>
-          <p className="mt-1 text-sm text-[var(--pv-cream)]/70">{vagas.length} vagas cadastradas</p>
-        </div>
-        <Button onClick={openCreate}>
-          <Plus size={16} /> Adicionar nova vaga
-        </Button>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {vagas.map((vaga) => {
-          const unit = store.units.find((u) => u.id === vaga.unit_id)
-          const cands = store.candidatos.filter((c) => c.vaga_id === vaga.id)
-          const counts = countByStatus(cands)
-          return (
-            <button
-              key={vaga.id}
-              type="button"
-              onClick={() => setDetail(vaga)}
-              className="rounded-2xl bg-[#FBF9F3] p-5 text-left shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
-                  {unit?.name}
-                </p>
-                <div className="flex gap-1">
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="rounded-lg bg-[#F1EDE0] p-1.5 text-[var(--pv-navy)] hover:bg-[#E7E2D3]"
-                    onClick={(e) => openEdit(vaga, e)}
-                    onKeyDown={(e) => e.key === 'Enter' && openEdit(vaga)}
-                  >
-                    <Pencil size={14} />
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="rounded-lg bg-[#FBEAEA] p-1.5 text-[#B23B3B] hover:bg-[#f5d5d5]"
-                    onClick={(e) => removeVaga(vaga, e)}
-                    onKeyDown={(e) => e.key === 'Enter' && removeVaga(vaga)}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                </div>
-              </div>
-              <h2 className="mt-1 font-display text-xl text-[var(--pv-navy)]">{vaga.titulo}</h2>
-              <p className="mt-2 line-clamp-2 text-sm text-[#6B664F]">{vaga.descricao}</p>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                <StatusPill label={`${cands.length} candidatos`} color="#1B2A57" bg="#EEF0F4" />
-                {counts.entrevista ? (
-                  <StatusPill
-                    label={`${counts.entrevista} entrevista`}
-                    color={STATUS_META.entrevista.color}
-                    bg={STATUS_META.entrevista.bg}
-                  />
-                ) : null}
-                {!vaga.ativa ? <StatusPill label="Inativa" color="#6B664F" bg="#F1EDE0" /> : null}
-              </div>
-            </button>
+      <PageHeader
+        eyebrow="Cadastro"
+        title="Vagas"
+        description={`${vagas.length} vaga${vagas.length === 1 ? '' : 's'} cadastrada${vagas.length === 1 ? '' : 's'}`}
+        actions={
+          units.length === 0 ? (
+            isAdmin ? (
+              <Link to="/admin/unidades">
+                <Button>
+                  <Plus size={16} /> Cadastrar unidade
+                </Button>
+              </Link>
+            ) : undefined
+          ) : (
+            <Button onClick={openCreate}>
+              <Plus size={16} /> Nova vaga
+            </Button>
           )
-        })}
-      </div>
+        }
+      />
 
-      {detail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(14,23,48,0.55)] p-5">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-[#FBF9F3] p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
-                  {store.units.find((u) => u.id === detail.unit_id)?.name}
-                </p>
-                <h3 className="font-display text-2xl text-[var(--pv-navy)]">{detail.titulo}</h3>
-              </div>
-              <button type="button" className="rounded-lg p-2 hover:bg-[#F1EDE0]" onClick={() => setDetail(null)}>
-                <X size={18} />
+      {vagas.length === 0 ? (
+        <div className="mt-8">
+          <EmptyState
+            tone="dark"
+            title={units.length === 0 ? 'Cadastre uma unidade primeiro' : 'Nenhuma vaga ainda'}
+            description={
+              units.length === 0
+                ? 'As vagas ficam ligadas a uma unidade. Crie a casa e depois publique a vaga.'
+                : 'Crie a primeira vaga para começar a receber candidaturas.'
+            }
+            action={
+              units.length === 0 && isAdmin ? (
+                <Link to="/admin/unidades">
+                  <Button>
+                    <Plus size={16} /> Criar unidade
+                  </Button>
+                </Link>
+              ) : units.length > 0 ? (
+                <Button onClick={openCreate}>
+                  <Plus size={16} /> Criar vaga
+                </Button>
+              ) : undefined
+            }
+          />
+        </div>
+      ) : (
+        <div className="pv-stagger mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {vagas.map((vaga) => {
+            const unit = store.units.find((u) => u.id === vaga.unit_id)
+            const cands = store.candidatos.filter((c) => c.vaga_id === vaga.id)
+            const counts = countByStatus(cands)
+            return (
+              <button
+                key={vaga.id}
+                type="button"
+                onClick={() => setDetail(vaga)}
+                className="rounded-2xl bg-[var(--pv-surface)] p-5 text-left shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pv-terracotta)]"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
+                    {unit?.name}
+                  </p>
+                  <div className="flex gap-1">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Editar vaga"
+                      className="rounded-lg bg-[#F1EDE0] p-1.5 text-[var(--pv-navy)] hover:bg-[#E7E2D3]"
+                      onClick={(e) => openEdit(vaga, e)}
+                      onKeyDown={(e) => e.key === 'Enter' && openEdit(vaga)}
+                    >
+                      <Pencil size={14} />
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Excluir vaga"
+                      className="rounded-lg bg-[#FBEAEA] p-1.5 text-[#B23B3B] hover:bg-[#f5d5d5]"
+                      onClick={(e) => removeVaga(vaga, e)}
+                      onKeyDown={(e) => e.key === 'Enter' && removeVaga(vaga)}
+                    >
+                      <Trash2 size={14} />
+                    </span>
+                  </div>
+                </div>
+                <h2 className="mt-1 font-display text-xl leading-snug text-[var(--pv-ink)]">{vaga.titulo}</h2>
+                <p className="mt-2 line-clamp-2 text-sm text-[var(--pv-muted)]">{vaga.descricao}</p>
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  <StatusPill label={`${cands.length} candidatos`} color="#1B2A57" bg="#EEF0F4" />
+                  {counts.entrevista ? (
+                    <StatusPill
+                      label={`${counts.entrevista} entrevista`}
+                      color={STATUS_META.entrevista.color}
+                      bg={STATUS_META.entrevista.bg}
+                    />
+                  ) : null}
+                  {!vaga.ativa ? <StatusPill label="Inativa" color="#6B664F" bg="#F1EDE0" /> : null}
+                </div>
               </button>
-            </div>
+            )
+          })}
+        </div>
+      )}
+
+      <Modal
+        open={Boolean(detail)}
+        title={detail?.titulo || 'Detalhe da vaga'}
+        onClose={() => setDetail(null)}
+        wide
+      >
+        {detail ? (
+          <>
+            <p className="pv-eyebrow">
+              {store.units.find((u) => u.id === detail.unit_id)?.name}
+            </p>
             <div className="mt-4 space-y-2 text-sm text-[#4A4636]">
               <p>
                 <strong>Local:</strong> {detail.localidade || '—'}
               </p>
               <p>
-                <strong>Tipo:</strong> {detail.tipo || '—'}
+                <strong>Tipo / regime:</strong> {detail.tipo || '—'} · {detail.regime || 'CLT'}
+              </p>
+              <p>
+                <strong>Salário:</strong> {detail.salario || '—'}
+              </p>
+              <p>
+                <strong>Horário:</strong> {detail.horario || '—'}
               </p>
               <p>
                 <strong>Status:</strong> {detail.ativa ? 'Ativa' : 'Inativa'}
@@ -189,21 +278,23 @@ export function AdminVagasListPage() {
               <p>
                 <strong>Criada em:</strong> {formatDateBR(detail.criada_em)}
               </p>
-              <p className="whitespace-pre-wrap rounded-xl bg-white p-3 border border-[#E7E2D3]">
+              <p className="whitespace-pre-wrap rounded-xl border border-[var(--pv-line)] bg-white p-3">
                 {detail.descricao}
               </p>
+              {detail.requisitos ? (
+                <p className="whitespace-pre-wrap rounded-xl border border-[var(--pv-line)] bg-white p-3">
+                  <strong>Requisitos</strong>
+                  {'\n'}
+                  {detail.requisitos}
+                </p>
+              ) : null}
               <p>
                 <strong>Candidatos:</strong>{' '}
                 {store.candidatos.filter((c) => c.vaga_id === detail.id).length}
               </p>
             </div>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  openEdit(detail)
-                }}
-              >
+              <Button variant="ghost" onClick={() => openEdit(detail)}>
                 <Pencil size={14} /> Editar
               </Button>
               <Link to={`/admin/vagas/${detail.id}`}>
@@ -213,74 +304,181 @@ export function AdminVagasListPage() {
                 <Trash2 size={14} /> Excluir
               </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        ) : null}
+      </Modal>
 
-      {(creating || editing) && (
-        <VagaFormModal
-          title={editing ? 'Editar vaga' : 'Nova vaga'}
-          form={form}
-          units={units}
-          onChange={setForm}
-          onClose={() => {
-            setCreating(false)
-            setEditing(null)
-          }}
-          onSave={saveForm}
-        />
-      )}
+      <VagaFormModal
+        open={creating || Boolean(editing)}
+        title={editing ? 'Editar vaga' : 'Nova vaga'}
+        form={form}
+        units={units}
+        error={formError}
+        saving={saving}
+        onChange={setForm}
+        onClose={() => {
+          setCreating(false)
+          setEditing(null)
+          setFormError('')
+        }}
+        onSave={() => void saveForm()}
+      />
     </div>
   )
 }
 
 function VagaFormModal({
+  open,
   title,
   form,
   units,
+  error,
+  saving,
   onChange,
   onClose,
   onSave,
 }: {
+  open: boolean
   title: string
   form: VagaForm
   units: { id: string; name: string }[]
+  error?: string
+  saving?: boolean
   onChange: (f: VagaForm) => void
   onClose: () => void
   onSave: () => void
 }) {
+  const [aiLoading, setAiLoading] = useState(false)
+
+  function fillWithAi() {
+    if (!form.titulo.trim() || aiLoading) return
+    setAiLoading(true)
+    window.setTimeout(() => {
+      const unitName = units.find((u) => u.id === form.unitId)?.name
+      const draft = generateVagaDraft({
+        titulo: form.titulo,
+        unitName,
+        tipo: form.tipo,
+        regime: form.regime,
+      })
+      onChange({
+        ...form,
+        descricao: draft.descricao,
+        localidade: form.localidade.trim() || draft.localidade,
+        horario: draft.horario,
+        salario: form.salario.trim() || draft.salario,
+        responsabilidades: draft.responsabilidades,
+        requisitos: draft.requisitos,
+        diferenciais: draft.diferenciais,
+        beneficios: draft.beneficios,
+      })
+      setAiLoading(false)
+    }, 700)
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(14,23,48,0.55)] p-5">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-[#FBF9F3] p-5 shadow-2xl">
-        <h3 className="font-display text-xl text-[var(--pv-navy)]">{title}</h3>
-        <div className="mt-4 space-y-3">
-          <Field label="Unidade">
-            <Select value={form.unitId} onChange={(e) => onChange({ ...form, unitId: e.target.value })}>
-              {units.map((u) => (
+    <Modal open={open} title={title} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Unidade">
+          <Select value={form.unitId} onChange={(e) => onChange({ ...form, unitId: e.target.value })}>
+            {units.length === 0 ? (
+              <option value="">Nenhuma unidade cadastrada</option>
+            ) : (
+              units.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Título *">
-            <Input value={form.titulo} onChange={(e) => onChange({ ...form, titulo: e.target.value })} />
-          </Field>
-          <Field label="Localidade">
-            <Input value={form.localidade} onChange={(e) => onChange({ ...form, localidade: e.target.value })} />
-          </Field>
-          <Field label="Tipo">
-            <Select value={form.tipo} onChange={(e) => onChange({ ...form, tipo: e.target.value })}>
-              <option>Presencial</option>
-              <option>Híbrido</option>
-              <option>Remoto</option>
-            </Select>
-          </Field>
-          <Field label="Descrição">
+              ))
+            )}
+          </Select>
+        </Field>
+        <Field
+          label="Título *"
+          hint="Digite o cargo e use a IA para montar descrição, requisitos e benefícios."
+        >
+          <Input
+            value={form.titulo}
+            onChange={(e) => onChange({ ...form, titulo: e.target.value })}
+            placeholder="Ex: Chapeiro, Garçom, Gerente de loja"
+          />
+        </Field>
+        <Button
+          type="button"
+          variant="navy"
+          className="w-full"
+          disabled={!form.titulo.trim() || aiLoading}
+          onClick={fillWithAi}
+        >
+          <Sparkles size={15} />
+          {aiLoading ? 'IA preenchendo os campos…' : 'Preencher com IA'}
+        </Button>
+        <Field label="Localidade">
+          <Input value={form.localidade} onChange={(e) => onChange({ ...form, localidade: e.target.value })} />
+        </Field>
+        <Field label="Tipo">
+          <Select value={form.tipo} onChange={(e) => onChange({ ...form, tipo: e.target.value })}>
+            <option>Presencial</option>
+            <option>Híbrido</option>
+            <option>Remoto</option>
+          </Select>
+        </Field>
+          <Field label="Descrição curta">
             <Textarea
-              rows={4}
+              rows={3}
               value={form.descricao}
               onChange={(e) => onChange({ ...form, descricao: e.target.value })}
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Salário">
+              <Input
+                value={form.salario}
+                onChange={(e) => onChange({ ...form, salario: e.target.value })}
+                placeholder="Ex: R$ 2.400 – R$ 2.900"
+              />
+            </Field>
+            <Field label="Regime">
+              <Select value={form.regime} onChange={(e) => onChange({ ...form, regime: e.target.value })}>
+                <option>CLT</option>
+                <option>Temporário</option>
+                <option>Estágio</option>
+                <option>PJ</option>
+              </Select>
+            </Field>
+          </div>
+          <Field label="Horário / escala">
+            <Input
+              value={form.horario}
+              onChange={(e) => onChange({ ...form, horario: e.target.value })}
+              placeholder="Ex: Seg a sáb · turnos de 8h"
+            />
+          </Field>
+          <Field label="Responsabilidades" hint="Uma por linha (use • no início se quiser)">
+            <Textarea
+              rows={4}
+              value={form.responsabilidades}
+              onChange={(e) => onChange({ ...form, responsabilidades: e.target.value })}
+            />
+          </Field>
+          <Field label="O que a vaga pede (requisitos)">
+            <Textarea
+              rows={4}
+              value={form.requisitos}
+              onChange={(e) => onChange({ ...form, requisitos: e.target.value })}
+            />
+          </Field>
+          <Field label="Diferenciais">
+            <Textarea
+              rows={3}
+              value={form.diferenciais}
+              onChange={(e) => onChange({ ...form, diferenciais: e.target.value })}
+            />
+          </Field>
+          <Field label="Benefícios">
+            <Textarea
+              rows={3}
+              value={form.beneficios}
+              onChange={(e) => onChange({ ...form, beneficios: e.target.value })}
             />
           </Field>
           <label className="flex items-center gap-2 text-sm font-semibold text-[var(--pv-navy)]">
@@ -291,15 +489,17 @@ function VagaFormModal({
             />
             Vaga ativa (visível no site)
           </label>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button onClick={onSave}>Salvar</Button>
-        </div>
+          {error ? <Alert tone="error">{error}</Alert> : null}
       </div>
-    </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button onClick={onSave} disabled={!form.titulo.trim() || !form.unitId || saving || aiLoading}>
+          {saving ? 'Salvando…' : 'Salvar'}
+        </Button>
+      </div>
+    </Modal>
   )
 }
 
@@ -318,6 +518,7 @@ export function AdminCandidatesPage() {
   const [unitFilter, setUnitFilter] = useState('all')
   const [vagaFilter, setVagaFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [detail, setDetail] = useState<CandidateDetailData | null>(null)
 
   const vagasForUnit =
     unitFilter === 'all' ? scopedVagas : scopedVagas.filter((v) => v.unit_id === unitFilter)
@@ -336,18 +537,31 @@ export function AdminCandidatesPage() {
       .sort((a, b) => +new Date(b.criado_em) - +new Date(a.criado_em))
   }, [store, vagaIds, unitFilter, vagaFilter, statusFilter, q])
 
+  function openCandidate(c: (typeof candidatos)[number]) {
+    const vaga = store.vagas.find((v) => v.id === c.vaga_id) || null
+    const unit = store.units.find((u) => u.id === vaga?.unit_id)
+    setDetail({
+      candidato: c,
+      profile: store.profiles.find((p) => p.id === c.profile_id) || null,
+      experiences: store.experiences.filter((e) => e.profile_id === c.profile_id),
+      vaga,
+      unitName: unit?.name,
+    })
+  }
+
   return (
     <div className="px-5 py-6 sm:px-8">
-      <h1 className="font-display text-3xl text-[#F7F4EC]">Candidatos</h1>
-      <p className="mt-1 text-sm text-[var(--pv-cream)]/70">
-        {candidatos.length} resultado{candidatos.length === 1 ? '' : 's'}
-      </p>
+      <PageHeader
+        eyebrow="Base"
+        title="Candidatos"
+        description={`${candidatos.length} resultado${candidatos.length === 1 ? '' : 's'} com os filtros atuais`}
+      />
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Nome">
+        <Field label="Nome" labelClassName="text-[var(--pv-cream)]/75">
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nome" />
         </Field>
-        <Field label="Unidade">
+        <Field label="Unidade" labelClassName="text-[var(--pv-cream)]/75">
           <Select
             value={unitFilter}
             onChange={(e) => {
@@ -365,7 +579,7 @@ export function AdminCandidatesPage() {
               ))}
           </Select>
         </Field>
-        <Field label="Vaga">
+        <Field label="Vaga" labelClassName="text-[var(--pv-cream)]/75">
           <Select value={vagaFilter} onChange={(e) => setVagaFilter(e.target.value)}>
             <option value="all">Todas</option>
             {vagasForUnit.map((v) => (
@@ -375,7 +589,7 @@ export function AdminCandidatesPage() {
             ))}
           </Select>
         </Field>
-        <Field label="Status">
+        <Field label="Status" labelClassName="text-[var(--pv-cream)]/75">
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="all">Todos</option>
             {(Object.keys(STATUS_META) as CandidateStatus[]).map((s) => (
@@ -387,11 +601,11 @@ export function AdminCandidatesPage() {
         </Field>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-2xl bg-[#FBF9F3] shadow-xl">
+      <div className="mt-6 overflow-hidden rounded-2xl bg-[var(--pv-surface)] shadow-xl">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="pv-table w-full min-w-[720px] text-left text-sm">
             <thead className="bg-white">
-              <tr className="border-b border-[#E7E2D3] text-[11px] uppercase tracking-wide text-[#6B664F]">
+              <tr className="border-b border-[var(--pv-line)] text-[11px] uppercase tracking-wide text-[var(--pv-muted)]">
                 <th className="px-5 py-4 font-bold">Nome</th>
                 <th className="px-5 py-4 font-bold">Vaga</th>
                 <th className="px-5 py-4 font-bold">Unidade</th>
@@ -404,10 +618,21 @@ export function AdminCandidatesPage() {
                 const vaga = store.vagas.find((v) => v.id === c.vaga_id)
                 const unit = store.units.find((u) => u.id === vaga?.unit_id)
                 return (
-                  <tr key={c.id} className="border-b border-[#F1EDE0]">
-                    <td className="px-5 py-3.5 font-semibold text-[var(--pv-navy)]">{c.nome}</td>
-                    <td className="px-5 py-3.5">{vaga?.titulo}</td>
-                    <td className="px-5 py-3.5 text-[#6B664F]">{unit?.name}</td>
+                  <tr
+                    key={c.id}
+                    className="cursor-pointer border-b border-[#F1EDE0]"
+                    tabIndex={0}
+                    onClick={() => openCandidate(c)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        openCandidate(c)
+                      }
+                    }}
+                  >
+                    <td className="px-5 py-3.5 font-semibold text-[var(--pv-ink)]">{c.nome}</td>
+                    <td className="px-5 py-3.5 font-medium text-[var(--pv-ink)]">{vaga?.titulo}</td>
+                    <td className="px-5 py-3.5 text-[var(--pv-muted)]">{unit?.name}</td>
                     <td className="px-5 py-3.5">
                       <StatusPill
                         label={STATUS_META[c.status].label}
@@ -416,7 +641,11 @@ export function AdminCandidatesPage() {
                       />
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <Link to={`/admin/vagas/${c.vaga_id}`} className="font-semibold text-[var(--pv-terracotta)]">
+                      <Link
+                        to={`/admin/vagas/${c.vaga_id}`}
+                        className="font-semibold text-[var(--pv-terracotta)] hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         Pipeline →
                       </Link>
                     </td>
@@ -425,7 +654,7 @@ export function AdminCandidatesPage() {
               })}
               {candidatos.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-[#A9A493]">
+                  <td colSpan={5} className="px-5 py-12 text-center text-[#A9A493]">
                     Nenhum candidato com esses filtros
                   </td>
                 </tr>
@@ -434,6 +663,8 @@ export function AdminCandidatesPage() {
           </table>
         </div>
       </div>
+
+      <CandidateDetailModal open={Boolean(detail)} data={detail} onClose={() => setDetail(null)} />
     </div>
   )
 }

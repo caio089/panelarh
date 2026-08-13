@@ -5,20 +5,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { supabase } from '@/lib/supabase'
 import { DISC_QUESTIONS, computeDiscScores, DISC_LABELS, type DiscDimension } from '@/lib/disc'
-import { uid } from '@/lib/utils'
-import type { Experience } from '@/types'
-import { PublicHeader, LoadingScreen } from '@/components/Layout'
-import { Button, Field, Input, Textarea } from '@/components/ui'
+import { FORM_SHIFTS, YES_NO } from '@/lib/applicationForm'
+import { PublicHeader, PublicFooter, LoadingScreen } from '@/components/Layout'
+import { Alert, Button, Field, Input, Select, Textarea } from '@/components/ui'
 
-const STEPS = ['Pessoal', 'Profissional', 'Experiências', 'DISC', 'Currículo'] as const
-
-function mockBagKey(userId: string) {
-  return `panela_rh_mock_form_${userId}`
-}
+const STEPS = ['Dados', 'Vaga', 'Sobre você', 'DISC'] as const
 
 export function ProfileOnboardingPage() {
-  const { user, profile, loading, mockMode, updateLocalProfile, refreshProfile } = useAuth()
-  const { upsertProfile, replaceExperiences } = useData()
+  const { user, profile, loading, updateLocalProfile, refreshProfile } = useAuth()
+  const { upsertProfile, store } = useData()
   const [params] = useSearchParams()
   const redirect = params.get('redirect') || '/candidato'
   const navigate = useNavigate()
@@ -30,90 +25,57 @@ export function ProfileOnboardingPage() {
 
   const [personal, setPersonal] = useState({
     full_name: '',
-    phone: '',
     cpf: '',
+    phone: '',
     city: '',
-    birth_date: '',
   })
-  const [professional, setProfessional] = useState({
+  const [job, setJob] = useState({
     desired_role: '',
-    availability: '',
-    salary_expectation: '',
-    linkedin: '',
+    preferred_unit: '',
+    weekend_availability: '',
+    has_transport: '',
   })
-  const [experiences, setExperiences] = useState<
-    Array<Pick<Experience, 'id' | 'company' | 'role_title' | 'start_date' | 'end_date' | 'description'>>
-  >([])
+  const [shifts, setShifts] = useState<string[]>([])
+  const [story, setStory] = useState({
+    about_me: '',
+    relevant_experience: '',
+    why_company: '',
+  })
   const [discAnswers, setDiscAnswers] = useState<Record<string, number>>({})
-  const [cvFile, setCvFile] = useState<File | null>(null)
 
   useEffect(() => {
     if (!user) return
     if (profile) {
       setPersonal({
         full_name: profile.full_name || '',
-        phone: profile.phone || '',
         cpf: profile.cpf || '',
+        phone: profile.phone || '',
         city: profile.city || '',
-        birth_date: profile.birth_date || '',
       })
-      setProfessional({
+      setJob({
         desired_role: profile.desired_role || '',
-        availability: profile.availability || '',
-        salary_expectation: profile.salary_expectation || '',
-        linkedin: profile.linkedin || '',
+        preferred_unit: profile.preferred_unit || '',
+        weekend_availability: profile.weekend_availability || '',
+        has_transport: profile.has_transport || '',
+      })
+      setShifts(
+        (profile.shifts || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      setStory({
+        about_me: profile.about_me || '',
+        relevant_experience: profile.relevant_experience || '',
+        why_company: profile.why_company || '',
       })
     }
 
-    if (mockMode) {
-      try {
-        const raw = localStorage.getItem(mockBagKey(user.id))
-        if (raw) {
-          const parsed = JSON.parse(raw) as {
-            experiences?: typeof experiences
-            discAnswers?: Record<string, number>
-          }
-          if (parsed.experiences?.length) setExperiences(parsed.experiences)
-          else {
-            setExperiences([
-              { id: uid(), company: '', role_title: '', start_date: '', end_date: '', description: '' },
-            ])
-          }
-          if (parsed.discAnswers) setDiscAnswers(parsed.discAnswers)
-        } else {
-          setExperiences([
-            { id: uid(), company: '', role_title: '', start_date: '', end_date: '', description: '' },
-          ])
-        }
-      } catch {
-        setExperiences([
-          { id: uid(), company: '', role_title: '', start_date: '', end_date: '', description: '' },
-        ])
-      }
-      return
-    }
-
-    ;(async () => {
-      const [{ data: exps }, { data: answers }] = await Promise.all([
-        supabase.from('experiences').select('*').eq('profile_id', user.id).order('created_at'),
-        supabase.from('disc_answers').select('question_key, value').eq('profile_id', user.id),
-      ])
-      if (exps?.length) {
-        setExperiences(
-          exps.map((e) => ({
-            id: e.id,
-            company: e.company,
-            role_title: e.role_title,
-            start_date: e.start_date,
-            end_date: e.end_date,
-            description: e.description,
-          })),
-        )
-      } else {
-        setExperiences([
-          { id: uid(), company: '', role_title: '', start_date: '', end_date: '', description: '' },
-        ])
-      }
+    void (async () => {
+      const { data: answers } = await supabase
+        .from('disc_answers')
+        .select('question_key, value')
+        .eq('profile_id', user.id)
       if (answers?.length) {
         const map: Record<string, number> = {}
         answers.forEach((a) => {
@@ -122,7 +84,7 @@ export function ProfileOnboardingPage() {
         setDiscAnswers(map)
       }
     })()
-  }, [user, profile, mockMode])
+  }, [user, profile])
 
   const progress = useMemo(() => ((step + 1) / STEPS.length) * 100, [step])
   const discScores = useMemo(() => computeDiscScores(discAnswers), [discAnswers])
@@ -133,12 +95,8 @@ export function ProfileOnboardingPage() {
     return null
   }
 
-  function persistMockForm() {
-    if (!user) return
-    localStorage.setItem(
-      mockBagKey(user.id),
-      JSON.stringify({ experiences, discAnswers, cvName: cvFile?.name || null }),
-    )
+  function toggleShift(shift: string) {
+    setShifts((prev) => (prev.includes(shift) ? prev.filter((s) => s !== shift) : [...prev, shift]))
   }
 
   async function saveStep() {
@@ -148,160 +106,80 @@ export function ProfileOnboardingPage() {
     setOk('')
 
     try {
-      if (mockMode) {
-        if (step === 0) {
-          updateLocalProfile({
-            full_name: personal.full_name,
-            phone: personal.phone,
-            cpf: personal.cpf,
-            city: personal.city,
-            birth_date: personal.birth_date || null,
-          })
-          if (user) {
-            upsertProfile({
-              ...(profile as NonNullable<typeof profile>),
-              id: user.id,
-              full_name: personal.full_name,
-              phone: personal.phone,
-              cpf: personal.cpf,
-              city: personal.city,
-              birth_date: personal.birth_date || null,
-              role: 'candidate',
-              email: profile?.email || user.email || null,
-            })
-          }
-        }
-        if (step === 1) {
-          updateLocalProfile({ ...professional })
-          if (user && profile) {
-            upsertProfile({ ...profile, ...professional, id: user.id, role: 'candidate' })
-          }
-        }
-        if (step === 2) {
-          persistMockForm()
-          if (user) {
-            replaceExperiences(
-              user.id,
-              experiences
-                .filter((e) => e.company.trim() && e.role_title.trim())
-                .map((e) => ({
-                  id: e.id,
-                  profile_id: user.id,
-                  company: e.company,
-                  role_title: e.role_title,
-                  start_date: e.start_date || null,
-                  end_date: e.end_date || null,
-                  description: e.description || null,
-                })),
-            )
-          }
-        }
-        if (step === 3) {
-          const missing = DISC_QUESTIONS.some((q) => !discAnswers[q.key])
-          if (missing) throw new Error('Responda todas as perguntas DISC.')
-          const scores = computeDiscScores(discAnswers)
-          updateLocalProfile({
-            disc_d: scores.D,
-            disc_i: scores.I,
-            disc_s: scores.S,
-            disc_c: scores.C,
-          })
-          persistMockForm()
-          if (user && profile) {
-            upsertProfile({
-              ...profile,
-              id: user.id,
-              role: 'candidate',
-              disc_d: scores.D,
-              disc_i: scores.I,
-              disc_s: scores.S,
-              disc_c: scores.C,
-            })
-          }
-        }
-        if (step === 4) {
-          persistMockForm()
-          updateLocalProfile({ onboarding_completed: true })
-          if (user && profile) {
-            upsertProfile({
-              ...profile,
-              id: user.id,
-              role: 'candidate',
-              onboarding_completed: true,
-              full_name: personal.full_name || profile.full_name,
-              phone: personal.phone || profile.phone,
-              cpf: personal.cpf || profile.cpf,
-              city: personal.city || profile.city,
-              birth_date: personal.birth_date || profile.birth_date,
-              ...professional,
-            })
-            replaceExperiences(
-              user.id,
-              experiences
-                .filter((e) => e.company.trim() && e.role_title.trim())
-                .map((e) => ({
-                  id: e.id,
-                  profile_id: user.id,
-                  company: e.company,
-                  role_title: e.role_title,
-                  start_date: e.start_date || null,
-                  end_date: e.end_date || null,
-                  description: e.description || null,
-                })),
-            )
-          }
-          await refreshProfile()
-          setOk('Perfil concluído! Agora você pode se candidatar.')
-          setTimeout(() => navigate(redirect), 700)
-          setSaving(false)
-          return
-        }
-        setOk('Salvo!')
-        setStep((s) => Math.min(s + 1, STEPS.length - 1))
-        setSaving(false)
-        return
-      }
-
       if (step === 0) {
+        if (!personal.full_name.trim() || !personal.cpf.trim() || !personal.phone.trim() || !personal.city.trim()) {
+          throw new Error('Preencha nome, CPF, WhatsApp e bairro.')
+        }
+        const cpf = personal.cpf.replace(/\D/g, '')
+        if (cpf.length !== 11) throw new Error('CPF deve ter 11 números.')
         const { error: err } = await supabase
           .from('profiles')
           .update({
-            full_name: personal.full_name,
-            phone: personal.phone,
-            cpf: personal.cpf,
-            city: personal.city,
-            birth_date: personal.birth_date || null,
+            full_name: personal.full_name.trim(),
+            cpf,
+            phone: personal.phone.trim(),
+            city: personal.city.trim(),
             updated_at: new Date().toISOString(),
           })
           .eq('id', user.id)
         if (err) throw err
+        updateLocalProfile({
+          full_name: personal.full_name.trim(),
+          cpf,
+          phone: personal.phone.trim(),
+          city: personal.city.trim(),
+        })
       }
 
       if (step === 1) {
+        if (!job.desired_role.trim()) throw new Error('Informe o cargo de interesse.')
+        if (!job.preferred_unit) throw new Error('Selecione a unidade.')
+        if (shifts.length === 0) throw new Error('Selecione pelo menos um turno.')
+        if (!job.weekend_availability) throw new Error('Informe a disponibilidade nos finais de semana.')
+        if (!job.has_transport) throw new Error('Informe se possui transporte.')
+        const shiftsText = shifts.join(', ')
         const { error: err } = await supabase
           .from('profiles')
-          .update({ ...professional, updated_at: new Date().toISOString() })
+          .update({
+            desired_role: job.desired_role.trim(),
+            preferred_unit: job.preferred_unit,
+            weekend_availability: job.weekend_availability,
+            has_transport: job.has_transport,
+            shifts: shiftsText,
+            availability: `${shiftsText} · FDS: ${job.weekend_availability}`,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', user.id)
         if (err) throw err
+        updateLocalProfile({
+          desired_role: job.desired_role.trim(),
+          preferred_unit: job.preferred_unit,
+          weekend_availability: job.weekend_availability,
+          has_transport: job.has_transport,
+          shifts: shiftsText,
+          availability: `${shiftsText} · FDS: ${job.weekend_availability}`,
+        })
       }
 
       if (step === 2) {
-        await supabase.from('experiences').delete().eq('profile_id', user.id)
-        const rows = experiences
-          .filter((e) => e.company.trim() && e.role_title.trim())
-          .map((e) => ({
-            id: e.id,
-            profile_id: user.id,
-            company: e.company,
-            role_title: e.role_title,
-            start_date: e.start_date || null,
-            end_date: e.end_date || null,
-            description: e.description || null,
-          }))
-        if (rows.length) {
-          const { error: err } = await supabase.from('experiences').insert(rows)
-          if (err) throw err
+        if (!story.about_me.trim() || !story.relevant_experience.trim() || !story.why_company.trim()) {
+          throw new Error('Conte sobre você, a experiência e por que quer trabalhar aqui.')
         }
+        const { error: err } = await supabase
+          .from('profiles')
+          .update({
+            about_me: story.about_me.trim(),
+            relevant_experience: story.relevant_experience.trim(),
+            why_company: story.why_company.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+        if (err) throw err
+        updateLocalProfile({
+          about_me: story.about_me.trim(),
+          relevant_experience: story.relevant_experience.trim(),
+          why_company: story.why_company.trim(),
+        })
       }
 
       if (step === 3) {
@@ -323,29 +201,32 @@ export function ProfileOnboardingPage() {
             disc_i: scores.I,
             disc_s: scores.S,
             disc_c: scores.C,
+            onboarding_completed: true,
             updated_at: new Date().toISOString(),
           })
           .eq('id', user.id)
         if (pErr) throw pErr
-      }
-
-      if (step === 4) {
-        if (cvFile) {
-          const safe = cvFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-          const path = `${user.id}/${Date.now()}-${safe}`
-          const { error: upErr } = await supabase.storage
-            .from('curriculos')
-            .upload(path, cvFile, { upsert: true })
-          if (upErr) throw upErr
+        updateLocalProfile({
+          disc_d: scores.D,
+          disc_i: scores.I,
+          disc_s: scores.S,
+          disc_c: scores.C,
+          onboarding_completed: true,
+        })
+        if (profile) {
+          upsertProfile({
+            ...profile,
+            ...personal,
+            ...job,
+            ...story,
+            shifts: shifts.join(', '),
+            onboarding_completed: true,
+            id: user.id,
+            role: 'candidate',
+          })
         }
-
-        const { error: err } = await supabase
-          .from('profiles')
-          .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
-          .eq('id', user.id)
-        if (err) throw err
         await refreshProfile()
-        setOk('Perfil concluído!')
+        setOk('Cadastro concluído!')
         setTimeout(() => navigate(redirect), 700)
         setSaving(false)
         return
@@ -361,19 +242,26 @@ export function ProfileOnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <PublicHeader />
-      <div className="mx-auto max-w-3xl px-5 py-10">
-        <div className="animate-fade-up rounded-[18px] bg-[#FBF9F3] p-6 shadow-2xl sm:p-8">
-          <p className="text-[11px] font-bold uppercase tracking-[1.4px] text-[var(--pv-terracotta)]">
-            Cadastro do candidato
-          </p>
-          <h1 className="mt-1 font-display text-2xl text-[var(--pv-navy)] sm:text-3xl">
-            Complete seu perfil
-          </h1>
-          <p className="mt-2 text-sm text-[#6B664F]">
-            Essas informações serão usadas nas suas candidaturas e no painel do RH.
-          </p>
+      <div className="mx-auto w-full max-w-3xl flex-1 px-5 py-10">
+        <div className="animate-fade-up rounded-2xl border border-white/10 bg-[var(--pv-surface)] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.35)] sm:p-8">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="pv-eyebrow">Vem trabalhar com a gente!</p>
+              <h1 className="mt-1 font-display text-2xl text-[var(--pv-ink)] sm:text-3xl">
+                Complete seu cadastro
+              </h1>
+              <p className="mt-2 text-sm text-[var(--pv-muted)]">
+                Buscamos pessoas comprometidas, apaixonadas pelo que fazem e com vontade de crescer
+                junto com a gente. Etapa {step + 1} de {STEPS.length}: {STEPS[step]}.
+              </p>
+            </div>
+            <div className="rounded-xl bg-[#F1EDE0] px-3 py-2 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--pv-muted)]">Progresso</p>
+              <p className="font-display text-lg text-[var(--pv-ink)]">{Math.round(progress)}%</p>
+            </div>
+          </div>
 
           <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#E7E2D3]">
             <div
@@ -381,21 +269,21 @@ export function ProfileOnboardingPage() {
               style={{ width: `${progress}%` }}
             />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {STEPS.map((label, i) => (
               <button
                 key={label}
                 type="button"
                 onClick={() => setStep(i)}
-                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11.5px] font-bold ${
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11.5px] font-bold transition ${
                   i === step
                     ? 'bg-[var(--pv-navy)] text-[var(--pv-cream)]'
                     : i < step
-                      ? 'bg-[#E4F3E9] text-[#2F7D4F]'
-                      : 'bg-[#F1EDE0] text-[#6B664F]'
+                      ? 'bg-[#E4F3E9] text-[#2F7D4F] hover:brightness-95'
+                      : 'bg-[#F1EDE0] text-[#6B664F] hover:bg-[#E7E2D3]'
                 }`}
               >
-                {i < step ? <Check size={12} /> : null}
+                {i < step ? <Check size={12} /> : <span className="opacity-60">{i + 1}.</span>}
                 {label}
               </button>
             ))}
@@ -404,137 +292,168 @@ export function ProfileOnboardingPage() {
           <div className="mt-7 space-y-4">
             {step === 0 && (
               <>
-                <Field label="Nome completo *">
-                  <Input value={personal.full_name} onChange={(e) => setPersonal({ ...personal, full_name: e.target.value })} required />
+                <Field label="E-mail">
+                  <Input value={user.email || ''} disabled />
                 </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Telefone">
-                    <Input value={personal.phone} onChange={(e) => setPersonal({ ...personal, phone: e.target.value })} placeholder="(00) 00000-0000" />
-                  </Field>
-                  <Field label="CPF">
-                    <Input value={personal.cpf} onChange={(e) => setPersonal({ ...personal, cpf: e.target.value })} />
-                  </Field>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Cidade">
-                    <Input value={personal.city} onChange={(e) => setPersonal({ ...personal, city: e.target.value })} />
-                  </Field>
-                  <Field label="Data de nascimento">
-                    <Input type="date" value={personal.birth_date} onChange={(e) => setPersonal({ ...personal, birth_date: e.target.value })} />
-                  </Field>
-                </div>
+                <Field label="Nos diga seu nome completo *">
+                  <Input
+                    value={personal.full_name}
+                    onChange={(e) => setPersonal({ ...personal, full_name: e.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Qual o seu CPF? *" hint="Digite somente números">
+                  <Input
+                    inputMode="numeric"
+                    maxLength={14}
+                    value={personal.cpf}
+                    onChange={(e) =>
+                      setPersonal({ ...personal, cpf: e.target.value.replace(/\D/g, '').slice(0, 11) })
+                    }
+                    placeholder="00000000000"
+                  />
+                </Field>
+                <Field label="Qual seu WhatsApp para contato? *">
+                  <Input
+                    value={personal.phone}
+                    onChange={(e) => setPersonal({ ...personal, phone: e.target.value })}
+                    placeholder="(00) 00000-0000"
+                  />
+                </Field>
+                <Field label="Qual bairro você mora? *">
+                  <Input
+                    value={personal.city}
+                    onChange={(e) => setPersonal({ ...personal, city: e.target.value })}
+                  />
+                </Field>
               </>
             )}
 
             {step === 1 && (
               <>
-                <Field label="Cargo desejado">
-                  <Input value={professional.desired_role} onChange={(e) => setProfessional({ ...professional, desired_role: e.target.value })} placeholder="Ex: Chapeiro, Garçom, Gerente" />
+                <Field label="Qual cargo você tem interesse em trabalhar? *">
+                  <Input
+                    value={job.desired_role}
+                    onChange={(e) => setJob({ ...job, desired_role: e.target.value })}
+                    placeholder="Ex: Operador de caixa, Atendente, Cozinha"
+                  />
                 </Field>
-                <Field label="Disponibilidade">
-                  <Input value={professional.availability} onChange={(e) => setProfessional({ ...professional, availability: e.target.value })} placeholder="Ex: Integral, noites, finais de semana" />
+                <Field label="Qual unidade você gostaria de trabalhar? *">
+                  <Select
+                    value={job.preferred_unit}
+                    onChange={(e) => setJob({ ...job, preferred_unit: e.target.value })}
+                    disabled={store.units.length === 0}
+                  >
+                    <option value="">
+                      {store.units.length === 0 ? 'Nenhuma unidade cadastrada' : 'Selecione'}
+                    </option>
+                    {store.units.map((u) => (
+                      <option key={u.id} value={u.name}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Pretensão salarial (opcional)">
-                    <Input value={professional.salary_expectation} onChange={(e) => setProfessional({ ...professional, salary_expectation: e.target.value })} />
-                  </Field>
-                  <Field label="LinkedIn (opcional)">
-                    <Input value={professional.linkedin} onChange={(e) => setProfessional({ ...professional, linkedin: e.target.value })} />
-                  </Field>
+                <div>
+                  <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
+                    Selecione os turnos que você consegue trabalhar *
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {FORM_SHIFTS.map((shift) => {
+                      const on = shifts.includes(shift)
+                      return (
+                        <button
+                          key={shift}
+                          type="button"
+                          onClick={() => toggleShift(shift)}
+                          className={`rounded-xl px-3.5 py-2 text-sm font-bold transition ${
+                            on
+                              ? 'bg-[var(--pv-terracotta)] text-white'
+                              : 'bg-[#F1EDE0] text-[var(--pv-ink)] hover:bg-[#E7E2D3]'
+                          }`}
+                        >
+                          {shift}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
+                <Field label="Você tem disponibilidade para trabalhar aos finais de semana? *">
+                  <Select
+                    value={job.weekend_availability}
+                    onChange={(e) => setJob({ ...job, weekend_availability: e.target.value })}
+                  >
+                    <option value="">Selecione</option>
+                    {YES_NO.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Você possui transporte? *">
+                  <Select
+                    value={job.has_transport}
+                    onChange={(e) => setJob({ ...job, has_transport: e.target.value })}
+                  >
+                    <option value="">Selecione</option>
+                    {YES_NO.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               </>
             )}
 
             {step === 2 && (
-              <div className="space-y-4">
-                {experiences.map((exp, idx) => (
-                  <div key={exp.id} className="rounded-xl border border-[#E7E2D3] bg-white p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-bold text-[var(--pv-navy)]">Experiência {idx + 1}</p>
-                      {experiences.length > 1 && (
-                        <button
-                          type="button"
-                          className="text-xs font-semibold text-[#B23B3B]"
-                          onClick={() => setExperiences(experiences.filter((e) => e.id !== exp.id))}
-                        >
-                          Remover
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Empresa">
-                        <Input value={exp.company} onChange={(e) => {
-                          const next = [...experiences]
-                          next[idx] = { ...exp, company: e.target.value }
-                          setExperiences(next)
-                        }} />
-                      </Field>
-                      <Field label="Cargo">
-                        <Input value={exp.role_title} onChange={(e) => {
-                          const next = [...experiences]
-                          next[idx] = { ...exp, role_title: e.target.value }
-                          setExperiences(next)
-                        }} />
-                      </Field>
-                      <Field label="Início">
-                        <Input value={exp.start_date || ''} placeholder="MM/AAAA" onChange={(e) => {
-                          const next = [...experiences]
-                          next[idx] = { ...exp, start_date: e.target.value }
-                          setExperiences(next)
-                        }} />
-                      </Field>
-                      <Field label="Fim">
-                        <Input value={exp.end_date || ''} placeholder="MM/AAAA ou Atual" onChange={(e) => {
-                          const next = [...experiences]
-                          next[idx] = { ...exp, end_date: e.target.value }
-                          setExperiences(next)
-                        }} />
-                      </Field>
-                    </div>
-                    <div className="mt-3">
-                      <Field label="Descrição">
-                        <Textarea value={exp.description || ''} onChange={(e) => {
-                          const next = [...experiences]
-                          next[idx] = { ...exp, description: e.target.value }
-                          setExperiences(next)
-                        }} />
-                      </Field>
-                    </div>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    setExperiences([
-                      ...experiences,
-                      { id: uid(), company: '', role_title: '', start_date: '', end_date: '', description: '' },
-                    ])
-                  }
-                >
-                  + Adicionar experiência
-                </Button>
-              </div>
+              <>
+                <Field label="Nos conte um pouco sobre você! *">
+                  <Textarea
+                    rows={4}
+                    value={story.about_me}
+                    onChange={(e) => setStory({ ...story, about_me: e.target.value })}
+                  />
+                </Field>
+                <Field label="Descreva brevemente sua experiência profissional mais relevante para a área desejada *">
+                  <Textarea
+                    rows={4}
+                    value={story.relevant_experience}
+                    onChange={(e) => setStory({ ...story, relevant_experience: e.target.value })}
+                  />
+                </Field>
+                <Field label="Por que você quer trabalhar na nossa empresa? *">
+                  <Textarea
+                    rows={4}
+                    value={story.why_company}
+                    onChange={(e) => setStory({ ...story, why_company: e.target.value })}
+                  />
+                </Field>
+              </>
             )}
 
             {step === 3 && (
               <div className="space-y-5">
                 <p className="text-sm text-[#6B664F]">
-                  Avalie de 1 (discordo totalmente) a 5 (concordo totalmente).
+                  Avalie de 1 (discordo totalmente) a 5 (concordo totalmente). Isso ajuda o RH a
+                  entender seu perfil.
                 </p>
                 {DISC_QUESTIONS.map((q) => (
-                  <div key={q.key} className="rounded-xl border border-[#E7E2D3] bg-white p-4">
-                    <p className="text-sm font-semibold text-[var(--pv-navy)]">{q.text}</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                  <div key={q.key} className="rounded-xl border border-[var(--pv-line)] bg-white p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-[var(--pv-ink)]">{q.text}</p>
+                    <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={q.text}>
                       {[1, 2, 3, 4, 5].map((n) => (
                         <button
                           key={n}
                           type="button"
+                          role="radio"
+                          aria-checked={discAnswers[q.key] === n}
                           onClick={() => setDiscAnswers({ ...discAnswers, [q.key]: n })}
-                          className={`h-10 w-10 rounded-full text-sm font-bold ${
+                          className={`h-10 w-10 rounded-xl text-sm font-bold transition ${
                             discAnswers[q.key] === n
-                              ? 'bg-[var(--pv-terracotta)] text-white'
-                              : 'bg-[#F1EDE0] text-[var(--pv-navy)]'
+                              ? 'bg-[var(--pv-terracotta)] text-white shadow-md'
+                              : 'bg-[#F1EDE0] text-[var(--pv-ink)] hover:bg-[#E7E2D3]'
                           }`}
                         >
                           {n}
@@ -553,36 +472,30 @@ export function ProfileOnboardingPage() {
                 </div>
               </div>
             )}
-
-            {step === 4 && (
-              <div className="space-y-4">
-                <Field label="Currículo (PDF ou Word)">
-                  <Input
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    onChange={(e) => setCvFile(e.target.files?.[0] || null)}
-                  />
-                </Field>
-                <p className="text-sm text-[#6B664F]">
-                  Ao finalizar, seu perfil fica pronto para candidaturas. Você poderá editar depois.
-                </p>
-              </div>
-            )}
           </div>
 
-          {error ? <p className="mt-4 text-sm font-semibold text-[#B23B3B]">{error}</p> : null}
-          {ok ? <p className="mt-4 text-sm font-semibold text-[#2F7D4F]">{ok}</p> : null}
+          {error ? (
+            <div className="mt-4">
+              <Alert tone="error">{error}</Alert>
+            </div>
+          ) : null}
+          {ok ? (
+            <div className="mt-4">
+              <Alert tone="success">{ok}</Alert>
+            </div>
+          ) : null}
 
-          <div className="mt-7 flex flex-wrap justify-between gap-3">
+          <div className="mt-7 flex flex-wrap justify-between gap-3 border-t border-[var(--pv-line)] pt-5">
             <Button type="button" variant="ghost" disabled={step === 0 || saving} onClick={() => setStep((s) => s - 1)}>
               Voltar
             </Button>
             <Button type="button" disabled={saving} onClick={() => void saveStep()}>
-              {saving ? 'Salvando…' : step === STEPS.length - 1 ? 'Concluir perfil' : 'Salvar e continuar'}
+              {saving ? 'Salvando…' : step === STEPS.length - 1 ? 'Concluir cadastro' : 'Salvar e continuar'}
             </Button>
           </div>
         </div>
       </div>
+      <PublicFooter />
     </div>
   )
 }

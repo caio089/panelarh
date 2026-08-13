@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react'
 import { Link, Navigate } from 'react-router-dom'
-import { Briefcase, CheckCircle2, FileUser, MessageSquare } from 'lucide-react'
+import { Briefcase, CheckCircle2, FileUser, MessageSquare, ArrowRight } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { PublicHeader, LoadingScreen, EmptyState } from '@/components/Layout'
-import { Button, StatusPill } from '@/components/ui'
+import { PublicHeader, PublicFooter, LoadingScreen, EmptyState } from '@/components/Layout'
+import { Alert, Button, PageHeader, StatusPill } from '@/components/ui'
 import { STATUS_META } from '@/types'
 import { formatDateBR } from '@/lib/utils'
 
@@ -24,72 +25,96 @@ export function CandidateAreaPage() {
   )
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <PublicHeader />
-      <div className="mx-auto max-w-5xl px-5 py-10">
-        <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[var(--pv-terracotta)]">
-          Área do candidato
-        </p>
-        <h1 className="mt-1 font-display text-3xl text-[#F7F4EC] sm:text-4xl">
-          Olá, {profile?.full_name?.split(' ')[0] || 'candidato'}
-        </h1>
-        <p className="mt-2 text-sm text-[var(--pv-cream)]/70">
-          Aqui você acompanha seu perfil, candidaturas e mensagens do RH.
-        </p>
+      <div className="mx-auto w-full max-w-5xl flex-1 px-5 py-10">
+        <PageHeader
+          eyebrow="Área do candidato"
+          title={`Olá, ${profile?.full_name?.split(' ')[0] || 'candidato'}`}
+          description="Acompanhe seu perfil, candidaturas e mensagens do RH em um só lugar."
+        />
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Link to="/perfil" className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10">
-            <FileUser className="text-[var(--pv-terracotta)]" size={20} />
-            <p className="mt-3 font-display text-lg text-[#F7F4EC]">Meu perfil</p>
-            <p className="mt-1 text-xs text-[var(--pv-cream)]/65">
-              {profile?.onboarding_completed ? 'Perfil completo' : 'Complete para se candidatar'}
-            </p>
-          </Link>
-          <a href="/#vagas" className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10">
-            <Briefcase className="text-[var(--pv-terracotta)]" size={20} />
-            <p className="mt-3 font-display text-lg text-[#F7F4EC]">Ver vagas</p>
-            <p className="mt-1 text-xs text-[var(--pv-cream)]/65">Voltar à página pública</p>
-          </a>
-          <Link to="/mensagens" className="rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:bg-white/10">
-            <MessageSquare className="text-[var(--pv-terracotta)]" size={20} />
-            <p className="mt-3 font-display text-lg text-[#F7F4EC]">Mensagens</p>
-            <p className="mt-1 text-xs text-[var(--pv-cream)]/65">{messages.length} notificação(ões)</p>
-          </Link>
+        <div className="pv-stagger mt-8 grid gap-3 sm:grid-cols-3">
+          <QuickLink
+            to="/perfil"
+            icon={<FileUser size={18} />}
+            title="Meu perfil"
+            desc={profile?.onboarding_completed ? 'Perfil completo · editar' : 'Complete para se candidatar'}
+          />
+          <QuickLink
+            to="/"
+            icon={<Briefcase size={18} />}
+            title="Ver vagas"
+            desc="Voltar à página pública"
+          />
+          <QuickLink
+            to="/mensagens"
+            icon={<MessageSquare size={18} />}
+            title="Mensagens"
+            desc={
+              messages.length === 0
+                ? 'Nenhuma notificação'
+                : `${messages.length} notificação${messages.length === 1 ? '' : 'ões'}`
+            }
+          />
         </div>
 
         {!profile?.onboarding_completed ? (
-          <div className="mt-8 rounded-2xl border border-[var(--pv-terracotta)]/40 bg-[var(--pv-terracotta)]/10 p-5">
+          <div className="mt-8 rounded-2xl border border-[var(--pv-terracotta)]/35 bg-[var(--pv-terracotta)]/12 p-5">
             <p className="font-semibold text-[#F7F4EC]">Complete seu cadastro</p>
             <p className="mt-1 text-sm text-[var(--pv-cream)]/75">
               Dados pessoais, experiências e DISC são enviados ao RH quando você se candidata.
             </p>
             <Link to="/perfil" className="mt-4 inline-block">
-              <Button>Preencher perfil</Button>
+              <Button>
+                Preencher perfil <ArrowRight size={15} />
+              </Button>
             </Link>
           </div>
         ) : (
-          <div className="mt-8 flex items-center gap-2 rounded-2xl bg-[#E4F3E9]/15 px-4 py-3 text-sm text-[#E4F3E9]">
-            <CheckCircle2 size={16} /> Perfil pronto para candidaturas
+          <div className="mt-8">
+            <Alert tone="success" className="border border-white/10 bg-[#E4F3E9]/15 text-[#E4F3E9]">
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 size={15} /> Perfil pronto para candidaturas
+              </span>
+            </Alert>
           </div>
         )}
 
         <section className="mt-10">
-          <h2 className="font-display text-2xl text-[#F7F4EC]">Minhas candidaturas</h2>
-          <div className="mt-4 space-y-3">
-            {candidaturas.length === 0 ? (
-              <EmptyState
-                title="Nenhuma candidatura ainda"
-                description="Escolha uma vaga na página pública e clique em Candidatar-se."
-              />
-            ) : (
-              candidaturas.map((c) => {
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <h2 className="font-display text-2xl text-[#F7F4EC]">Minhas candidaturas</h2>
+            {candidaturas.length > 0 ? (
+              <Link to="/" className="text-sm font-semibold text-[var(--pv-cream)]/80 hover:text-[var(--pv-cream)]">
+                Ver mais vagas →
+              </Link>
+            ) : null}
+          </div>
+
+          {candidaturas.length === 0 ? (
+            <EmptyState
+              tone="dark"
+              title="Nenhuma candidatura ainda"
+              description="Escolha uma vaga na página pública e clique em Candidatar-se."
+              action={
+                <Link to="/">
+                  <Button>Ir para vagas</Button>
+                </Link>
+              }
+            />
+          ) : (
+            <div className="pv-stagger space-y-3">
+              {candidaturas.map((c) => {
                 const vaga = store.vagas.find((v) => v.id === c.vaga_id)
                 const unit = store.units.find((u) => u.id === vaga?.unit_id)
                 return (
-                  <article key={c.id} className="pv-card flex flex-wrap items-center justify-between gap-3 p-5">
-                    <div>
+                  <article
+                    key={c.id}
+                    className="pv-card flex flex-wrap items-center justify-between gap-3 p-5"
+                  >
+                    <div className="min-w-0">
                       <p className="font-bold text-[var(--pv-navy)]">{vaga?.titulo || 'Vaga'}</p>
-                      <p className="text-sm text-[#6B664F]">
+                      <p className="mt-0.5 text-sm text-[var(--pv-muted)]">
                         {unit?.name} · enviada em {formatDateBR(c.criado_em)}
                       </p>
                     </div>
@@ -100,16 +125,38 @@ export function CandidateAreaPage() {
                     />
                   </article>
                 )
-              })
-            )}
-          </div>
-          {candidaturas.length === 0 ? (
-            <Link to="/" className="mt-4 inline-block">
-              <Button>Ir para vagas</Button>
-            </Link>
-          ) : null}
+              })}
+            </div>
+          )}
         </section>
       </div>
+      <PublicFooter />
     </div>
+  )
+}
+
+function QuickLink({
+  to,
+  icon,
+  title,
+  desc,
+}: {
+  to: string
+  icon: ReactNode
+  title: string
+  desc: string
+}) {
+  return (
+    <Link
+      to={to}
+      className="pv-panel group p-5 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pv-terracotta)]"
+    >
+      <div className="text-[var(--pv-terracotta)]">{icon}</div>
+      <p className="mt-3 font-display text-lg text-[#F7F4EC]">{title}</p>
+      <p className="mt-1 text-xs text-[var(--pv-cream)]/65">{desc}</p>
+      <p className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-[var(--pv-cream)]/80 opacity-0 transition group-hover:opacity-100">
+        Abrir <ArrowRight size={12} />
+      </p>
+    </Link>
   )
 }
