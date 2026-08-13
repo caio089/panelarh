@@ -4,17 +4,14 @@ import { DataProvider } from '@/contexts/DataContext'
 import { AdminShell } from '@/components/AdminShell'
 import { CareersPage } from '@/pages/CareersPage'
 import { JobDetailPage } from '@/pages/JobDetailPage'
-import { AuthPage } from '@/pages/AuthPage'
+import { PublicApplyPage } from '@/pages/PublicApplyPage'
 import { AdminLoginPage } from '@/pages/AdminLoginPage'
-import { ProfileOnboardingPage } from '@/pages/ProfileOnboardingPage'
-import { CandidateAreaPage } from '@/pages/CandidateAreaPage'
 import { AdminDashboardPage } from '@/pages/AdminDashboardPage'
 import { AdminBoardPage } from '@/pages/AdminBoardPage'
 import { AdminVagaPage } from '@/pages/AdminVagaPage'
 import { AdminVagasListPage, AdminCandidatesPage } from '@/pages/AdminListsPage'
 import { AdminUnitsPage } from '@/pages/AdminUnitsPage'
 import { AdminSelectionPage } from '@/pages/AdminSelectionPage'
-import { CandidateMessagesPage } from '@/pages/CandidateMessagesPage'
 
 export default function App() {
   return (
@@ -22,17 +19,16 @@ export default function App() {
       <DataProvider>
         <BrowserRouter>
           <Routes>
-            {/* Público — mesmo link para todo mundo */}
             <Route path="/" element={<CareersPage />} />
             <Route path="/vagas/:id" element={<JobDetailPage />} />
+            <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
 
-            {/* Candidato */}
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/candidato" element={<CandidateAreaPage />} />
-            <Route path="/perfil" element={<ProfileOnboardingPage />} />
-            <Route path="/mensagens" element={<CandidateMessagesPage />} />
+            {/* Legado candidato → site público */}
+            <Route path="/auth" element={<Navigate to="/" replace />} />
+            <Route path="/candidato" element={<Navigate to="/" replace />} />
+            <Route path="/perfil" element={<Navigate to="/" replace />} />
+            <Route path="/mensagens" element={<Navigate to="/" replace />} />
 
-            {/* Admin — link próprio */}
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/admin" element={<AdminShell />}>
               <Route index element={<AdminDashboardPage />} />

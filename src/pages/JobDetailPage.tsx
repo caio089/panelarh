@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   MapPin,
   Building2,
-  CheckCircle2,
   Clock3,
   Wallet,
   BriefcaseBusiness,
@@ -18,94 +17,24 @@ import { useData } from '@/contexts/DataContext'
 import { PublicHeader, PublicFooter, EmptyState } from '@/components/Layout'
 import { Alert, Button } from '@/components/ui'
 import { linesFromText } from '@/lib/vagaDetails'
-import type { Profile } from '@/types'
-import type { ReactNode } from 'react'
 
 export function JobDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, profile, isStaff } = useAuth()
-  const { getVaga, applyToVaga, store } = useData()
-  const [applying, setApplying] = useState(false)
-  const [message, setMessage] = useState('')
+  const { isStaff } = useAuth()
+  const { getVaga } = useData()
   const [error, setError] = useState('')
 
   const vaga = id ? getVaga(id) : undefined
-  const alreadyApplied = Boolean(
-    user && vaga && store.candidatos.some((c) => c.vaga_id === vaga.id && c.profile_id === user.id),
-  )
 
-  async function handleApply() {
+  function handleApply() {
     setError('')
-    setMessage('')
     if (isStaff) {
-      setError('Contas de RH não se candidatam. Use a Área do candidato.')
-      return
-    }
-    if (!user) {
-      navigate(`/auth?redirect=/vagas/${id}`)
-      return
-    }
-    if (!profile?.onboarding_completed) {
-      navigate(`/perfil?redirect=/vagas/${id}`)
+      setError('Contas de RH não se candidatam por aqui.')
       return
     }
     if (!vaga) return
-    if (alreadyApplied) {
-      setError('Você já se candidatou a esta vaga.')
-      return
-    }
-
-    setApplying(true)
-
-    const experiences = store.experiences.filter((e) => e.profile_id === user.id)
-    const expText = experiences
-      .map(
-        (e) =>
-          `${e.role_title} @ ${e.company}${e.start_date ? ` (${e.start_date}${e.end_date ? `–${e.end_date}` : ''})` : ''}${
-            e.description ? `: ${e.description}` : ''
-          }`,
-      )
-      .join('\n')
-
-    const fullProfile: Profile = {
-      ...profile,
-      id: user.id,
-      email: profile.email || user.email || null,
-      role: 'candidate',
-      onboarding_completed: true,
-    }
-
-    const result = await applyToVaga({
-      vagaId: vaga.id,
-      profile: fullProfile,
-      experiences,
-      nome: fullProfile.full_name || user.email || 'Candidato',
-      experiencia: expText || fullProfile.relevant_experience || null,
-      info: [
-        fullProfile.phone && `WhatsApp: ${fullProfile.phone}`,
-        fullProfile.cpf && `CPF: ${fullProfile.cpf}`,
-        fullProfile.city && `Bairro: ${fullProfile.city}`,
-        fullProfile.desired_role && `Cargo: ${fullProfile.desired_role}`,
-        fullProfile.preferred_unit && `Unidade: ${fullProfile.preferred_unit}`,
-        fullProfile.shifts && `Turnos: ${fullProfile.shifts}`,
-        fullProfile.weekend_availability && `FDS: ${fullProfile.weekend_availability}`,
-        fullProfile.has_transport && `Transporte: ${fullProfile.has_transport}`,
-        fullProfile.about_me && `Sobre: ${fullProfile.about_me}`,
-        fullProfile.why_company && `Motivação: ${fullProfile.why_company}`,
-        `DISC D${fullProfile.disc_d ?? 0} I${fullProfile.disc_i ?? 0} S${fullProfile.disc_s ?? 0} C${fullProfile.disc_c ?? 0}`,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-    })
-
-    setApplying(false)
-    if (result.error) {
-      setError(result.error)
-      return
-    }
-    setMessage('Candidatura enviada! Seu perfil completo já aparece no painel do RH.')
-    window.setTimeout(() => navigate('/candidato'), 900)
+    navigate(`/vagas/${vaga.id}/candidatar`)
   }
 
   if (!vaga) {
@@ -211,7 +140,7 @@ export function JobDetailPage() {
               </p>
               <ol className="mt-3 grid gap-2 text-sm text-[var(--pv-navy)] sm:grid-cols-4">
                 {[
-                  '1. Cadastro e perfil',
+                  '1. Formulário da vaga',
                   '2. Análise do RH',
                   '3. Entrevista',
                   '4. Proposta / início',
@@ -227,34 +156,15 @@ export function JobDetailPage() {
             </div>
 
             <div className="space-y-3 border-t border-[var(--pv-line)] pt-6">
-              {alreadyApplied ? (
-                <Alert tone="success">
-                  <span className="inline-flex items-center gap-1.5">
-                    <CheckCircle2 size={15} /> Você já se candidatou. Acompanhe em Minha área.
-                  </span>
-                </Alert>
-              ) : (
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button size="lg" onClick={() => void handleApply()} disabled={applying}>
-                    {applying ? 'Enviando…' : !user ? 'Entrar e candidatar-se' : 'Candidatar-se agora'}
-                  </Button>
-                  {!user ? (
-                    <p className="max-w-sm text-sm text-[var(--pv-muted)]">
-                      Crie sua conta, complete o perfil (experiências + DISC) e envie a candidatura.
-                    </p>
-                  ) : !profile?.onboarding_completed ? (
-                    <p className="max-w-sm text-sm text-[var(--pv-muted)]">
-                      Complete seu perfil antes de se candidatar — o RH analisa tudo junto.
-                    </p>
-                  ) : (
-                    <p className="max-w-sm text-sm text-[var(--pv-muted)]">
-                      Seu perfil completo será enviado ao painel do RH desta unidade.
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button size="lg" onClick={handleApply}>
+                  Candidatar-se agora
+                </Button>
+                <p className="max-w-sm text-sm text-[var(--pv-muted)]">
+                  Sem criar conta: responda as perguntas e o RH recebe tudo ligado a esta vaga.
+                </p>
+              </div>
               {error ? <Alert tone="error">{error}</Alert> : null}
-              {message ? <Alert tone="success">{message}</Alert> : null}
             </div>
           </div>
         </article>
@@ -315,10 +225,7 @@ function Section({
       ) : (
         <ul className="mt-3 space-y-2">
           {items.map((item) => (
-            <li
-              key={item}
-              className="flex gap-2.5 text-[15px] leading-relaxed text-[#3F3B2F]"
-            >
+            <li key={item} className="flex gap-2.5 text-[15px] leading-relaxed text-[#3F3B2F]">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-sm bg-[var(--pv-terracotta)]" />
               <span>{item}</span>
             </li>

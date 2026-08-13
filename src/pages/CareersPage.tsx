@@ -32,8 +32,8 @@ export function CareersPage() {
               da nossa cozinha.
             </h1>
             <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-[var(--pv-cream)]/80">
-              Vagas abertas nas unidades Panela Velha. Candidate-se, complete seu perfil e acompanhe
-              cada etapa do processo.
+              Vagas abertas nas unidades Panela Velha. Candidate-se pelo formulário da vaga — o RH
+              recebe tudo direto no painel.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <a href="#vagas">
@@ -41,11 +41,6 @@ export function CareersPage() {
                   Ver vagas abertas <ArrowRight size={16} />
                 </Button>
               </a>
-              <Link to="/auth">
-                <Button variant="outline" size="lg">
-                  Área do candidato
-                </Button>
-              </Link>
             </div>
           </div>
         </div>
@@ -67,12 +62,7 @@ export function CareersPage() {
           <EmptyState
             tone="dark"
             title="Nenhuma vaga aberta agora"
-            description="Estamos preparando novas oportunidades. Volte em breve ou deixe seu perfil pronto."
-            action={
-              <Link to="/auth">
-                <Button>Criar meu perfil</Button>
-              </Link>
-            }
+            description="Estamos preparando novas oportunidades. Volte em breve."
           />
         ) : (
           <div className="pv-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -19,6 +19,7 @@ import { useData } from '@/contexts/DataContext'
 import { DISC_LABELS } from '@/lib/disc'
 import { formatDateBR } from '@/lib/utils'
 import { openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
+import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import type { Candidato, CandidateStatus, Experience, Profile } from '@/types'
 import { PIPELINE_ORDER, STATUS_META } from '@/types'
 import { Alert, Button, Field, Input, StatusPill, Textarea } from '@/components/ui'
@@ -67,7 +68,7 @@ export function AdminVagaPage() {
     return map
   }, [cands])
 
-  if (!isStaff) return <Navigate to="/auth?redirect=/admin" replace />
+  if (!isStaff) return <Navigate to="/admin/login" replace />
   if (!vaga) {
     return (
       <div className="px-5 py-16 sm:px-8">
@@ -201,7 +202,7 @@ export function AdminVagaPage() {
               <h3 className="mb-2 flex items-center gap-2 font-bold text-[var(--pv-navy)]">
                 <UserRound size={15} /> Dados
               </h3>
-              <ProfileAnswers profile={selected.profile} />
+              <ProfileAnswers profile={selected.profile} candidato={selected} />
               {selected.data_inicio_treinamento ? (
                 <p className="mt-2 text-[#4A4636]">
                   Início treinamento: {formatDateBR(selected.data_inicio_treinamento)}
@@ -209,7 +210,7 @@ export function AdminVagaPage() {
               ) : null}
             </section>
 
-            {selected.experiencia && !selected.profile?.relevant_experience ? (
+            {selected.experiencia && selected.profile?.relevant_experience ? (
               <section>
                 <h3 className="mb-2 font-bold text-[var(--pv-navy)]">Experiência</h3>
                 <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
@@ -290,7 +291,10 @@ export function AdminVagaPage() {
               <Button
                 onClick={() => {
                   if (!notifyBody.trim()) return
-                  const sent = openWhatsAppChat(selected.profile?.phone, notifyBody.trim())
+                  const sent = openWhatsAppChat(
+                    phoneFromCandidatoInfo(selected.info_complementar, selected.profile?.phone),
+                    notifyBody.trim(),
+                  )
                   if (sent.error) {
                     setNotifyError(sent.error)
                     return

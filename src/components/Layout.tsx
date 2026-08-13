@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
-import { LogOut, Briefcase, LayoutDashboard, UserRound, Inbox } from 'lucide-react'
+import { LogOut, Briefcase, LayoutDashboard, Inbox } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
@@ -33,7 +33,7 @@ export function BrandMark({ compact = false, light = false }: { compact?: boolea
 }
 
 export function PublicHeader() {
-  const { user, profile, isStaff, signOut } = useAuth()
+  const { isStaff, signOut } = useAuth()
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0E1730]/78 backdrop-blur-xl">
@@ -56,47 +56,25 @@ export function PublicHeader() {
             <Briefcase size={14} /> Vagas
           </NavLink>
 
-          {isStaff && (
-            <NavLink
-              to="/admin"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(239,227,196,0.3)] px-3 py-2 text-[12.5px] font-semibold text-[var(--pv-cream)] transition hover:bg-white/5"
-            >
-              <LayoutDashboard size={14} />
-              <span className="hidden sm:inline">Painel RH</span>
-              <span className="sm:hidden">RH</span>
-            </NavLink>
-          )}
-
-          {user && !isStaff ? (
+          {isStaff ? (
             <>
               <NavLink
-                to="/candidato"
-                className={({ isActive }) =>
-                  cn(
-                    'inline-flex max-w-[150px] items-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-semibold transition',
-                    isActive
-                      ? 'bg-[rgba(239,227,196,0.16)] text-[var(--pv-cream)]'
-                      : 'text-[var(--pv-cream)]/85 hover:bg-white/5',
-                  )
-                }
+                to="/admin"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(239,227,196,0.3)] px-3 py-2 text-[12.5px] font-semibold text-[var(--pv-cream)] transition hover:bg-white/5"
               >
-                <UserRound size={14} className="shrink-0" />
-                <span className="truncate">{profile?.full_name?.split(' ')[0] || 'Minha área'}</span>
+                <LayoutDashboard size={14} />
+                <span className="hidden sm:inline">Painel RH</span>
+                <span className="sm:hidden">RH</span>
               </NavLink>
-              <Button variant="outline" size="sm" onClick={() => void signOut()} aria-label="Sair">
+              <Button variant="outline" size="sm" onClick={() => void signOut()}>
                 <LogOut size={14} />
                 <span className="hidden sm:inline">Sair</span>
               </Button>
             </>
-          ) : !user ? (
-            <Link to="/auth">
-              <Button size="sm">Candidatar-me</Button>
+            ) : (
+            <Link to="/">
+              <Button size="sm">Ver vagas</Button>
             </Link>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => void signOut()}>
-              <LogOut size={14} />
-              <span className="hidden sm:inline">Sair</span>
-            </Button>
           )}
         </nav>
       </div>

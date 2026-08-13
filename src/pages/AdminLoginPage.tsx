@@ -59,11 +59,7 @@ export function AdminLoginPage() {
             Painel do RH
           </h1>
           <p className="mt-2 text-center text-[13px] leading-relaxed text-[var(--pv-muted)]">
-            Área interna para vagas, pipeline e seleção. Candidatos devem usar{' '}
-            <Link to="/auth" className="font-semibold text-[var(--pv-terracotta)]">
-              /auth
-            </Link>
-            .
+            Área interna para vagas, pipeline e seleção. Candidatos se candidatam pelo site, sem login.
           </p>
 
           <form className="mt-5 space-y-3.5" onSubmit={(e) => void onSubmit(e)}>
@@ -98,9 +94,8 @@ export function AdminLoginPage() {
           </form>
 
           <p className="mt-6 text-center text-[12.5px] text-[var(--pv-muted)]">
-            É candidato?{' '}
-            <Link to="/auth" className="font-semibold text-[var(--pv-terracotta)] hover:underline">
-              Acesse a área do candidato
+            <Link to="/" className="font-semibold text-[var(--pv-terracotta)] hover:underline">
+              ← Voltar ao site de vagas
             </Link>
           </p>
         </div>

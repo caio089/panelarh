@@ -222,6 +222,10 @@ do $$ begin
   drop policy if exists "cand_staff_all" on public.candidatos;
   create policy "cand_read_own_or_staff" on public.candidatos
     for select using (profile_id = auth.uid() or public.is_staff());
+  -- Candidatura pública (sem login): qualquer pessoa pode enviar o formulário
+  drop policy if exists "cand_public_insert" on public.candidatos;
+  create policy "cand_public_insert" on public.candidatos
+    for insert with check (profile_id is null);
   create policy "cand_public_insert_auth" on public.candidatos
     for insert with check (auth.uid() is not null);
   create policy "cand_staff_all" on public.candidatos

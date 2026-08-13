@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { DISC_LABELS } from '@/lib/disc'
 import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
+import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { formatDateBR } from '@/lib/utils'
 import { STATUS_META, type Candidato, type Experience, type Profile, type Vaga } from '@/types'
 import { Button, Modal, StatusPill } from '@/components/ui'
@@ -44,7 +45,8 @@ export function CandidateDetailModal({
       trainingDate: candidato.data_inicio_treinamento,
     }) ||
     DEFAULT_WHATSAPP_MSG
-  const hasPhone = Boolean(profile?.phone)
+  const phone = phoneFromCandidatoInfo(candidato.info_complementar, profile?.phone)
+  const hasPhone = Boolean(phone)
   const hasDisc = profile?.disc_d != null
 
   return (
@@ -69,7 +71,7 @@ export function CandidateDetailModal({
       </p>
 
       <div className="mt-4">
-        <ProfileAnswers profile={profile} />
+        <ProfileAnswers profile={profile} candidato={candidato} />
       </div>
 
       {candidato.data_inicio_treinamento ? (
@@ -140,7 +142,7 @@ export function CandidateDetailModal({
         {hasPhone ? (
           <Button
             onClick={() => {
-              const sent = openWhatsAppChat(profile?.phone, message)
+              const sent = openWhatsAppChat(phone, message)
               if (sent.error) {
                 window.alert(sent.error)
                 return

@@ -67,6 +67,21 @@ interface DataContextValue {
     experiencia?: string | null
     info?: string | null
   }) => Promise<{ error?: string; candidatoId?: string }>
+  submitPublicApplication: (input: {
+    vagaId: string
+    nome: string
+    cpf: string
+    phone: string
+    city: string
+    preferredUnit: string
+    shifts: string
+    weekendAvailability: string
+    hasTransport: string
+    aboutMe: string
+    experience: string
+    whyCompany: string
+    disc: { D: number; I: number; S: number; C: number }
+  }) => Promise<{ error?: string; candidatoId?: string }>
   sendMessage: (candidatoId: string, senderId: string, body: string) => void
   addUnit: (name: string) => Promise<string>
   updateUnit: (id: string, name: string) => Promise<void>
@@ -432,6 +447,55 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [refreshStore, store.candidatos],
   )
 
+  const submitPublicApplication = useCallback(
+    async (input: {
+      vagaId: string
+      nome: string
+      cpf: string
+      phone: string
+      city: string
+      preferredUnit: string
+      shifts: string
+      weekendAvailability: string
+      hasTransport: string
+      aboutMe: string
+      experience: string
+      whyCompany: string
+      disc: { D: number; I: number; S: number; C: number }
+    }) => {
+      const info = [
+        `WhatsApp: ${input.phone}`,
+        `CPF: ${input.cpf}`,
+        `Bairro: ${input.city}`,
+        `Unidade: ${input.preferredUnit}`,
+        `Turnos: ${input.shifts}`,
+        `FDS: ${input.weekendAvailability}`,
+        `Transporte: ${input.hasTransport}`,
+        `Sobre: ${input.aboutMe}`,
+        `Motivação: ${input.whyCompany}`,
+        `DISC D${input.disc.D} I${input.disc.I} S${input.disc.S} C${input.disc.C}`,
+      ].join('\n')
+
+      const { data, error } = await supabase
+        .from('candidatos')
+        .insert({
+          vaga_id: input.vagaId,
+          profile_id: null,
+          nome: input.nome,
+          experiencia: input.experience,
+          info_complementar: info,
+          status: 'pendente',
+        })
+        .select('id')
+        .single()
+
+      if (error) return { error: error.message }
+      await refreshStore()
+      return { candidatoId: data.id }
+    },
+    [refreshStore],
+  )
+
   const sendMessage = useCallback(
     (candidatoId: string, senderId: string, body: string) => {
       void supabase
@@ -531,6 +595,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       upsertProfile,
       replaceExperiences,
       applyToVaga,
+      submitPublicApplication,
       sendMessage,
       addUnit,
       updateUnit,
@@ -550,6 +615,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       upsertProfile,
       replaceExperiences,
       applyToVaga,
+      submitPublicApplication,
       sendMessage,
       getVaga,
       getCandidatosByVaga,

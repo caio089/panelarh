@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { scoreCandidateForVaga, explainSelection } from '@/lib/aiSelection'
 import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat } from '@/lib/whatsapp'
+import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { Button, Field, Input, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
 import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
 import { STATUS_META, type Candidato, type Profile, type Vaga } from '@/types'
@@ -340,7 +341,7 @@ export function AdminSelectionPage() {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {displayed.map((item, idx) => {
               const checked = selectedIds.includes(item.candidato.id)
-              const phone = item.profile?.phone
+              const phone = phoneFromCandidatoInfo(item.candidato.info_complementar, item.profile?.phone)
               return (
                 <article
                   key={item.candidato.id}
@@ -425,7 +426,11 @@ export function AdminSelectionPage() {
                   size="sm"
                   onClick={() => {
                     updateCandidatoStatus(winner.candidato.id, 'entrevista')
-                    notifyWhatsApp(winner.candidato.id, winner.profile?.phone, waMsg)
+                    notifyWhatsApp(
+                      winner.candidato.id,
+                      phoneFromCandidatoInfo(winner.candidato.info_complementar, winner.profile?.phone),
+                      waMsg,
+                    )
                   }}
                 >
                   Avançar + WhatsApp
