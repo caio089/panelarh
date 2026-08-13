@@ -222,7 +222,6 @@ export function ProfileOnboardingPage() {
             shifts: shifts.join(', '),
             onboarding_completed: true,
             id: user.id,
-            role: 'candidate',
           })
         }
         await refreshProfile()

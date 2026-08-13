@@ -114,7 +114,15 @@ export function PublicFooter() {
             © {new Date().getFullYear()} Panela Velha · Recrutamento & Seleção
           </p>
         </div>
-        <p className="text-xs text-[var(--pv-cream)]/45">Processo seletivo interno · dados tratados com cuidado</p>
+        <p className="text-xs text-[var(--pv-cream)]/45">
+          Processo seletivo interno · dados tratados com cuidado
+        </p>
+        <Link
+          to="/admin/login"
+          className="text-xs font-semibold text-[var(--pv-cream)]/55 transition hover:text-[var(--pv-cream)]"
+        >
+          Acesso RH
+        </Link>
       </div>
     </footer>
   )

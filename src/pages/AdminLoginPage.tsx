@@ -6,7 +6,7 @@ import { BrandMark } from '@/components/Layout'
 import { Alert, Button, Field, Input } from '@/components/ui'
 
 export function AdminLoginPage() {
-  const { signIn, user, profile, loading } = useAuth()
+  const { signIn, signOut, user, profile, loading, isStaff } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,21 +15,27 @@ export function AdminLoginPage() {
 
   useEffect(() => {
     if (loading || !user) return
-    if (profile?.role === 'admin' || profile?.role === 'lider') {
+    if (isStaff) {
       navigate('/admin', { replace: true })
-      return
     }
-    setError('Esta conta não é de administrador. Use o acesso de candidato em /auth.')
-  }, [loading, user, profile, navigate])
+  }, [loading, user, isStaff, navigate])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
     setBusy(true)
+    if (user && !isStaff) {
+      await signOut()
+    }
     const result = await signIn(email.trim(), password)
     setBusy(false)
-    if (result.error) setError(result.error)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
   }
+
+  const blockedCandidate = Boolean(user && profile && !isStaff)
 
   return (
     <div className="relative flex min-h-screen items-center justify-center px-5 py-10">
@@ -80,6 +86,11 @@ export function AdminLoginPage() {
                 autoComplete="current-password"
               />
             </Field>
+            {blockedCandidate ? (
+              <Alert tone="warning">
+                Você está logado como candidato ({profile?.email}). Entre com a conta do RH abaixo.
+              </Alert>
+            ) : null}
             {error ? <Alert tone="error">{error}</Alert> : null}
             <Button type="submit" className="w-full" size="lg" disabled={busy}>
               {busy ? 'Aguarde…' : 'Entrar no painel'}

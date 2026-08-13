@@ -49,15 +49,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let nextProfile = await fetchProfile(nextUser.id)
     if (!nextProfile) {
-      const { error } = await supabase.from('profiles').upsert({
-        id: nextUser.id,
-        email: nextUser.email,
-        full_name:
-          (nextUser.user_metadata?.full_name as string | undefined) ||
-          nextUser.email?.split('@')[0] ||
-          'Usuário',
-        role: 'candidate',
-      })
+      const { error } = await supabase.from('profiles').upsert(
+        {
+          id: nextUser.id,
+          email: nextUser.email,
+          full_name:
+            (nextUser.user_metadata?.full_name as string | undefined) ||
+            nextUser.email?.split('@')[0] ||
+            'Usuário',
+        },
+        { onConflict: 'id', ignoreDuplicates: true },
+      )
       if (error) console.error(error.message)
       nextProfile = await fetchProfile(nextUser.id)
     }

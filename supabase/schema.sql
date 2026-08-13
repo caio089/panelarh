@@ -114,7 +114,7 @@ begin
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    coalesce(new.raw_user_meta_data->>'role', 'candidate')
+    'candidate'
   )
   on conflict (id) do nothing;
   return new;
@@ -125,6 +125,28 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Impede o app de rebaixar admin/lider via update do próprio perfil
+create or replace function public.protect_profile_role()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.role is distinct from old.role then
+    if auth.jwt() is not null and coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then
+      new.role := old.role;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_profile_role on public.profiles;
+create trigger protect_profile_role
+  before update on public.profiles
+  for each row execute function public.protect_profile_role();
 
 -- Storage
 insert into storage.buckets (id, name, public)

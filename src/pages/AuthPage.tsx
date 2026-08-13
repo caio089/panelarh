@@ -121,6 +121,12 @@ export function AuthPage() {
           </form>
 
           <p className="mt-6 text-center text-[12.5px] text-[var(--pv-muted)]">
+            É da equipe RH?{' '}
+            <Link to="/admin/login" className="font-semibold text-[var(--pv-terracotta)] hover:underline">
+              Entrar no painel
+            </Link>
+          </p>
+          <p className="mt-3 text-center text-[12.5px] text-[var(--pv-muted)]">
             <Link to="/" className="font-semibold text-[var(--pv-navy)] hover:text-[var(--pv-terracotta)]">
               ← Voltar às vagas
             </Link>
