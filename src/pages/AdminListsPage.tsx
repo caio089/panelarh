@@ -507,12 +507,17 @@ export function AdminCandidatesPage() {
   const { isAdmin, profile } = useAuth()
   const { store } = useData()
 
-  const unitIds = isAdmin
-    ? store.units.map((u) => u.id)
-    : [profile?.unit_id || store.units[0]?.id]
+  const unitIds = useMemo(
+    () => (isAdmin ? store.units.map((u) => u.id) : [profile?.unit_id || store.units[0]?.id]),
+    [isAdmin, profile?.unit_id, store.units],
+  )
 
-  const scopedVagas = store.vagas.filter((v) => unitIds.includes(v.unit_id))
-  const vagaIds = new Set(scopedVagas.map((v) => v.id))
+  const scopedVagas = useMemo(
+    () => store.vagas.filter((v) => unitIds.includes(v.unit_id)),
+    [store.vagas, unitIds],
+  )
+
+  const vagaIds = useMemo(() => new Set(scopedVagas.map((v) => v.id)), [scopedVagas])
 
   const [q, setQ] = useState('')
   const [unitFilter, setUnitFilter] = useState('all')

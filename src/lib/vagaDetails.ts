@@ -3,6 +3,6 @@ export function linesFromText(value?: string | null): string[] {
   if (!value?.trim()) return []
   return value
     .split(/\r?\n/)
-    .map((line) => line.replace(/^[\s•\-\*]+/, '').trim())
+    .map((line) => line.replace(/^[\s•\-*]+/, '').trim())
     .filter(Boolean)
 }
