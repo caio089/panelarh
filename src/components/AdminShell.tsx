@@ -8,6 +8,7 @@ import {
   Sparkles,
   LogOut,
   ExternalLink,
+  RotateCcw,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
@@ -26,7 +27,13 @@ const NAV = [
 
 export function AdminShell() {
   const { profile, loading, isStaff, isAdmin, signOut } = useAuth()
-  const { store } = useData()
+  const { store, resetDemoData } = useData()
+
+  function confirmResetDemo() {
+    if (window.confirm('Restaurar os dados de demonstração? Vagas, candidatos e unidades criados serão apagados.')) {
+      resetDemoData()
+    }
+  }
 
   if (loading) return <LoadingScreen text="Abrindo painel…" />
   if (!isStaff) return <Navigate to="/admin/login" replace />
@@ -74,6 +81,9 @@ export function AdminShell() {
               <ExternalLink size={14} /> Site de vagas
             </Button>
           </Link>
+          <Button variant="outline" size="sm" className="w-full justify-start" onClick={confirmResetDemo}>
+            <RotateCcw size={14} /> Restaurar demo
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -94,6 +104,9 @@ export function AdminShell() {
                 <ExternalLink size={14} />
               </Button>
             </Link>
+            <Button variant="outline" size="sm" onClick={confirmResetDemo} aria-label="Restaurar demo">
+              <RotateCcw size={14} />
+            </Button>
             <Button variant="outline" size="sm" onClick={() => void signOut()} aria-label="Sair">
               <LogOut size={14} />
             </Button>
