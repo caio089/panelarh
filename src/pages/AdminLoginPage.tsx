@@ -4,13 +4,11 @@ import { Shield } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { BrandMark } from '@/components/Layout'
 import { Alert, Button, Field, Input } from '@/components/ui'
-import { DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD } from '@/lib/demo/auth'
-
 export function AdminLoginPage() {
   const { signIn, user, loading, isStaff } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState(DEMO_ADMIN_EMAIL)
-  const [password, setPassword] = useState(DEMO_ADMIN_PASSWORD)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -78,9 +76,6 @@ export function AdminLoginPage() {
                 autoComplete="current-password"
               />
             </Field>
-            <Alert tone="warning">
-              Modo demonstração: {DEMO_ADMIN_EMAIL} / {DEMO_ADMIN_PASSWORD}
-            </Alert>
             {error ? <Alert tone="error">{error}</Alert> : null}
             <Button type="submit" className="w-full" size="lg" disabled={busy}>
               {busy ? 'Aguarde…' : 'Entrar no painel'}

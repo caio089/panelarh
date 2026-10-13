@@ -12,38 +12,56 @@ import { AdminVagaPage } from '@/pages/AdminVagaPage'
 import { AdminVagasListPage, AdminCandidatesPage } from '@/pages/AdminListsPage'
 import { AdminUnitsPage } from '@/pages/AdminUnitsPage'
 import { AdminSelectionPage } from '@/pages/AdminSelectionPage'
+import { OwnerDashboardPage } from '@/pages/OwnerDashboardPage'
+import { TimeClockPage } from '@/pages/TimeClockPage'
+import { ManagersPage } from '@/pages/ManagersPage'
+import { UnitLayout } from '@/pages/unit/UnitLayout'
+import { UnitOverviewTab } from '@/pages/unit/UnitOverviewTab'
+import { UnitCollaboratorsTab } from '@/pages/unit/UnitCollaboratorsTab'
+import { UnitScheduleTab } from '@/pages/unit/UnitScheduleTab'
+import { GestaoStoreProvider } from '@/features/gestao/GestaoStoreProvider'
 
 export default function App() {
   return (
     <AuthProvider>
       <DataProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<CareersPage />} />
-            <Route path="/vagas/:id" element={<JobDetailPage />} />
-            <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
+        <GestaoStoreProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<CareersPage />} />
+              <Route path="/vagas/:id" element={<JobDetailPage />} />
+              <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
 
-            {/* Legado candidato → site público */}
-            <Route path="/auth" element={<Navigate to="/" replace />} />
-            <Route path="/candidato" element={<Navigate to="/" replace />} />
-            <Route path="/perfil" element={<Navigate to="/" replace />} />
-            <Route path="/mensagens" element={<Navigate to="/" replace />} />
+              {/* Legado candidato → site público */}
+              <Route path="/auth" element={<Navigate to="/" replace />} />
+              <Route path="/candidato" element={<Navigate to="/" replace />} />
+              <Route path="/perfil" element={<Navigate to="/" replace />} />
+              <Route path="/mensagens" element={<Navigate to="/" replace />} />
 
-            <Route path="/admin/login" element={<AdminLoginPage />} />
-            <Route path="/admin" element={<AdminShell />}>
-              <Route index element={<AdminDashboardPage />} />
-              <Route path="quadro" element={<AdminBoardPage />} />
-              <Route path="unidades" element={<AdminUnitsPage />} />
-              <Route path="vagas" element={<AdminVagasListPage />} />
-              <Route path="vagas/:id" element={<AdminVagaPage />} />
-              <Route path="candidatos" element={<AdminCandidatesPage />} />
-              <Route path="selecao" element={<AdminSelectionPage />} />
-              <Route path="mensagens" element={<Navigate to="/admin/selecao" replace />} />
-            </Route>
+              <Route path="/admin/login" element={<AdminLoginPage />} />
+              <Route path="/admin" element={<AdminShell />}>
+                <Route index element={<OwnerDashboardPage />} />
+                <Route path="unidade/:unitId" element={<UnitLayout />}>
+                  <Route index element={<UnitOverviewTab />} />
+                  <Route path="colaboradores" element={<UnitCollaboratorsTab />} />
+                  <Route path="escala" element={<UnitScheduleTab />} />
+                </Route>
+                <Route path="ponto" element={<TimeClockPage />} />
+                <Route path="gerentes" element={<ManagersPage />} />
+                <Route path="rh" element={<AdminDashboardPage />} />
+                <Route path="quadro" element={<AdminBoardPage />} />
+                <Route path="unidades" element={<AdminUnitsPage />} />
+                <Route path="vagas" element={<AdminVagasListPage />} />
+                <Route path="vagas/:id" element={<AdminVagaPage />} />
+                <Route path="candidatos" element={<AdminCandidatesPage />} />
+                <Route path="selecao" element={<AdminSelectionPage />} />
+                <Route path="mensagens" element={<Navigate to="/admin/selecao" replace />} />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </GestaoStoreProvider>
       </DataProvider>
     </AuthProvider>
   )

@@ -2,7 +2,8 @@ import type { AppStore } from '@/lib/data'
 import { buildDemoStore } from '@/lib/demo/seedData'
 
 /** Versione a chave ao mudar o formato do seed para descartar dados antigos do navegador. */
-const STORE_KEY = 'panela-demo-store-v1'
+const STORE_KEY = 'panela-demo-store-v3'
+const LEGACY_STORE_KEYS = ['panela-demo-store-v2']
 
 function isAppStore(value: unknown): value is AppStore {
   if (!value || typeof value !== 'object') return false
@@ -14,6 +15,7 @@ function isAppStore(value: unknown): value is AppStore {
 
 export function loadDemoStore(): AppStore {
   try {
+    for (const key of LEGACY_STORE_KEYS) window.localStorage.removeItem(key)
     const raw = window.localStorage.getItem(STORE_KEY)
     if (raw) {
       const parsed: unknown = JSON.parse(raw)

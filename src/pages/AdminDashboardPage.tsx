@@ -100,8 +100,8 @@ export function AdminDashboardPage() {
     <div className="px-5 py-6 sm:px-8 sm:py-8">
       <div className="animate-fade-up">
         <PageHeader
-          eyebrow="Inteligência de RH"
-          title="Dashboard"
+          eyebrow="Módulo de RH"
+          title="Painel de RH"
           description="Métricas operacionais e sinais de match para acelerar a seleção."
           actions={
             <Link
