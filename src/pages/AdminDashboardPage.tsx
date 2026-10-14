@@ -104,12 +104,20 @@ export function AdminDashboardPage() {
           title="Painel de RH"
           description="Métricas operacionais e sinais de match para acelerar a seleção."
           actions={
-            <Link
-              to="/admin/selecao"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[var(--pv-terracotta)] to-[#c94a32] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-[var(--pv-terracotta)]/25 transition hover:brightness-105"
-            >
-              <Sparkles size={16} /> Abrir Seleção com IA
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/admin/vagas"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-sm font-bold text-[var(--pv-cream)] transition hover:bg-white/10"
+              >
+                <Briefcase size={16} /> Vagas
+              </Link>
+              <Link
+                to="/admin/selecao"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[var(--pv-terracotta)] to-[#c94a32] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-[var(--pv-terracotta)]/25 transition hover:brightness-105"
+              >
+                <Sparkles size={16} /> Abrir Seleção com IA
+              </Link>
+            </div>
           }
         />
       </div>

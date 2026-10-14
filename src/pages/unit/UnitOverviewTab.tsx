@@ -10,6 +10,7 @@ import { CollaboratorTable } from '@/features/gestao/components/CollaboratorTabl
 import { OccurrenceKpiCard } from '@/features/gestao/components/OccurrenceKpiCard'
 import { OccurrenceTrendChart } from '@/features/gestao/components/OccurrenceTrendChart'
 import { PunctualityBreakdown } from '@/features/gestao/components/PunctualityBreakdown'
+import { DirceuOverview } from '@/features/dirceu/DirceuOverview'
 import { useUnitContext } from './unitContext'
 
 /** Indicadores da unidade e detalhamento por colaborador. */
@@ -19,8 +20,11 @@ export function UnitOverviewTab() {
   const view = useGestao(period, unitId)
   const [selected, setSelected] = useState<CollaboratorStats | null>(null)
 
+  const showsSaipos = unitId === 'unit-dirceu'
+
   return (
     <div className="pv-stagger space-y-5">
+      {showsSaipos ? <DirceuOverview paramPrefix="ops" /> : null}
       <div className="flex justify-end">
         <PeriodSelect value={period} onChange={setPeriod} />
       </div>

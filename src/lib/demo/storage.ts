@@ -1,5 +1,5 @@
 import type { AppStore } from '@/lib/data'
-import { buildDemoStore } from '@/lib/demo/seedData'
+import { buildDemoStore, withHouseUnits } from '@/lib/demo/seedData'
 
 /** Versione a chave ao mudar o formato do seed para descartar dados antigos do navegador. */
 const STORE_KEY = 'panela-demo-store-v3'
@@ -19,7 +19,15 @@ export function loadDemoStore(): AppStore {
     const raw = window.localStorage.getItem(STORE_KEY)
     if (raw) {
       const parsed: unknown = JSON.parse(raw)
-      if (isAppStore(parsed)) return parsed
+      if (isAppStore(parsed)) {
+        const units = withHouseUnits(parsed.units)
+        if (units.length !== parsed.units.length) {
+          const next = { ...parsed, units }
+          saveDemoStore(next)
+          return next
+        }
+        return parsed
+      }
     }
   } catch (err) {
     console.warn('Dados de demonstração inválidos no navegador; recriando.', err)

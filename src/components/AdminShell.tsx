@@ -1,11 +1,7 @@
 import { NavLink, Outlet, Navigate, Link } from 'react-router-dom'
 import {
   LayoutDashboard,
-  KanbanSquare,
   Building2,
-  Briefcase,
-  Users,
-  Sparkles,
   LogOut,
   ExternalLink,
   Clock,
@@ -44,13 +40,7 @@ const STATIC_GROUPS: NavGroup[] = [
   },
   {
     title: 'RH',
-    items: [
-      { to: '/admin/rh', label: 'Painel de RH', icon: PieChart },
-      { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
-      { to: '/admin/candidatos', label: 'Banco de talentos', icon: Users },
-      { to: '/admin/quadro', label: 'Quadro de seleção', icon: KanbanSquare },
-      { to: '/admin/selecao', label: 'Seleção com IA', icon: Sparkles },
-    ],
+    items: [{ to: '/admin/rh', label: 'RH', icon: PieChart }],
   },
   {
     title: 'Configurações',
