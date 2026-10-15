@@ -9,7 +9,6 @@ import { CollaboratorDetailModal } from '@/features/gestao/components/Collaborat
 import { CollaboratorTable } from '@/features/gestao/components/CollaboratorTable'
 import { OccurrenceKpiCard } from '@/features/gestao/components/OccurrenceKpiCard'
 import { OccurrenceTrendChart } from '@/features/gestao/components/OccurrenceTrendChart'
-import { PunctualityBreakdown } from '@/features/gestao/components/PunctualityBreakdown'
 import { DirceuOverview } from '@/features/dirceu/DirceuOverview'
 import { useUnitContext } from './unitContext'
 
@@ -44,18 +43,13 @@ export function UnitOverviewTab() {
         ))}
       </div>
 
-      <SectionCard title="Colaboradores" subtitle="Faltas, advertências, atestados, suspensões e ponto de cada pessoa no período">
+      <SectionCard title="Colaboradores" subtitle="Faltas, advertências, atestados e suspensões de cada pessoa no período">
         <CollaboratorTable stats={view.collaborators} onSelect={setSelected} />
       </SectionCard>
 
-      <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <SectionCard title="Evolução das ocorrências" subtitle="Últimos 6 meses nesta unidade">
-          <OccurrenceTrendChart series={view.monthlySeries} />
-        </SectionCard>
-        <SectionCard title="Ponto eletrônico" subtitle="Distribuição das entradas no período">
-          <PunctualityBreakdown counts={view.punctuality} />
-        </SectionCard>
-      </div>
+      <SectionCard title="Evolução das ocorrências" subtitle="Últimos 6 meses nesta unidade">
+        <OccurrenceTrendChart series={view.monthlySeries} />
+      </SectionCard>
 
       <CollaboratorDetailModal
         stats={selected}

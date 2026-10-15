@@ -1,8 +1,7 @@
-import { OCCURRENCE_META, WEEKDAY_LONG } from './constants'
+import { OCCURRENCE_META } from './constants'
 import {
   emptyOccurrenceCounts,
   percentChange,
-  punctualityShare,
   totalOccurrences,
   type CollaboratorStats,
   type UnitSummary,
@@ -91,7 +90,7 @@ function buildAttentionInsights({ units, collaborators }: InsightInput): AiInsig
       id: `critical-${c.colaborador.id}`,
       tone: 'atencao',
       title: `${c.colaborador.nome} em situação crítica`,
-      detail: `${plural(c.occurrences.falta, 'falta', 'faltas')}, ${plural(c.occurrences.advertencia, 'advertência', 'advertências')} e ${plural(c.punctuality.atrasado, 'atraso', 'atrasos')} · ${c.colaborador.cargo}${unitName ? ` · ${unitName}` : ''}.`,
+      detail: `${plural(c.occurrences.falta, 'falta', 'faltas')} e ${plural(c.occurrences.advertencia, 'advertência', 'advertências')} · ${c.colaborador.cargo}${unitName ? ` · ${unitName}` : ''}.`,
       unitId: c.colaborador.unitId,
     })
   }
@@ -109,31 +108,8 @@ function buildAttentionInsights({ units, collaborators }: InsightInput): AiInsig
   return insights.slice(0, MAX_PER_GROUP)
 }
 
-function buildImprovementInsights({ units, weekdayLateness, collaborators }: InsightInput): AiInsight[] {
+function buildImprovementInsights({ collaborators }: InsightInput): AiInsight[] {
   const insights: AiInsight[] = []
-
-  const worstDay = weekdayLateness.reduce((best, value, i) => (value > weekdayLateness[best] ? i : best), 0)
-  if (weekdayLateness[worstDay] > 0) {
-    insights.push({
-      id: 'weekday-lateness',
-      tone: 'melhorar',
-      title: `${WEEKDAY_LONG[worstDay]} é o dia com mais atrasos`,
-      detail: `${weekdayLateness[worstDay]}% das batidas chegam fora da tolerância. Reforçar escala e comunicação na véspera.`,
-    })
-  }
-
-  const edgeUnit = [...units].sort(
-    (a, b) => punctualityShare(b.punctuality, 'no_limite') - punctualityShare(a.punctuality, 'no_limite'),
-  )[0]
-  if (edgeUnit) {
-    insights.push({
-      id: `edge-${edgeUnit.unitId}`,
-      tone: 'melhorar',
-      title: `Muita gente chegando no limite em ${edgeUnit.unitName}`,
-      detail: `${punctualityShare(edgeUnit.punctuality, 'no_limite')}% das entradas acontecem em cima do horário — risco de virar atraso.`,
-      unitId: edgeUnit.unitId,
-    })
-  }
 
   const repeatedSickNotes = collaborators.filter((c) => c.occurrences.atestado >= 3).length
   if (repeatedSickNotes > 0) {
@@ -157,7 +133,7 @@ function buildHighlightInsights({ units, collaborators }: InsightInput): AiInsig
       id: `best-${bestUnit.unitId}`,
       tone: 'destaque',
       title: `${bestUnit.unitName} é a unidade mais estável`,
-      detail: `Saúde ${bestUnit.healthScore}/100 e ${bestUnit.punctualityRate}% de entradas com folga.`,
+      detail: `Saúde ${bestUnit.healthScore}/100 no período.`,
       unitId: bestUnit.unitId,
     })
   }
@@ -179,15 +155,13 @@ function buildHighlightInsights({ units, collaborators }: InsightInput): AiInsig
     })
   }
 
-  const exemplary = collaborators.filter(
-    (c) => totalOccurrences(c.occurrences) === 0 && c.punctuality.atrasado === 0 && c.punctualityRate >= 70,
-  ).length
+  const exemplary = collaborators.filter((c) => totalOccurrences(c.occurrences) === 0).length
   if (exemplary > 0) {
     insights.push({
       id: 'exemplary',
       tone: 'destaque',
       title: `${plural(exemplary, 'colaborador exemplar', 'colaboradores exemplares')}`,
-      detail: 'Zero ocorrências e nenhum atraso no período. Ótimos candidatos a reconhecimento.',
+      detail: 'Zero ocorrências no período. Ótimos candidatos a reconhecimento.',
     })
   }
 

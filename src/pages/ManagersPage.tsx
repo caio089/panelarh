@@ -3,9 +3,9 @@ import { Briefcase, ChevronRight, ShieldAlert, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/ui'
 import { useData } from '@/contexts/DataContext'
-import { OCCURRENCE_META, OCCURRENCE_TYPES, PUNCTUALITY_META } from '@/features/gestao/constants'
+import { OCCURRENCE_META, OCCURRENCE_TYPES } from '@/features/gestao/constants'
 import { tenureLabel } from '@/features/gestao/dateUtils'
-import { percentChange, totalOccurrences, type CollaboratorStats, type UnitSummary } from '@/features/gestao/metrics'
+import { percentChange, totalOccurrences, type UnitSummary } from '@/features/gestao/metrics'
 import { useGestao } from '@/features/gestao/useGestao'
 import { usePeriodParam } from '@/features/gestao/usePeriodParam'
 import { Avatar, DeltaBadge, PeriodSelect } from '@/features/gestao/components/atoms'
@@ -28,18 +28,14 @@ export function ManagersPage() {
 
       <div className="pv-stagger mt-7 grid gap-5 lg:grid-cols-3">
         {view.units.map((unit) => (
-          <ManagerCard
-            key={unit.unitId}
-            unit={unit}
-            stats={view.collaborators.find((c) => c.colaborador.id === unit.gerente?.id) ?? null}
-          />
+          <ManagerCard key={unit.unitId} unit={unit} />
         ))}
       </div>
     </div>
   )
 }
 
-function ManagerCard({ unit, stats }: { unit: UnitSummary; stats: CollaboratorStats | null }) {
+function ManagerCard({ unit }: { unit: UnitSummary }) {
   const { store } = useData()
   const openPositions = store.vagas.filter((v) => v.unit_id === unit.unitId && v.ativa).length
   const teamTotal = totalOccurrences(unit.occurrences)
@@ -63,11 +59,7 @@ function ManagerCard({ unit, stats }: { unit: UnitSummary; stats: CollaboratorSt
       </div>
 
       <div className="flex flex-1 flex-col p-5">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Tile label="Saúde da equipe" value={`${unit.healthScore}`} suffix="/100" />
-          <Tile label="Ponto próprio" value={`${stats?.punctualityRate ?? 0}%`} color={PUNCTUALITY_META.pontual.color} />
-          <Tile label="Atrasos próprios" value={`${stats?.punctuality.atrasado ?? 0}`} color={PUNCTUALITY_META.atrasado.color} />
-        </div>
+        <Tile label="Saúde da equipe" value={`${unit.healthScore}`} suffix="/100" />
 
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">

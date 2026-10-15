@@ -1,24 +1,22 @@
 import { useMemo, useState } from 'react'
 import { ArrowDownUp, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { OCCURRENCE_META, OCCURRENCE_TYPES, PUNCTUALITY_META, PUNCTUALITY_STATUSES } from '../constants'
+import { OCCURRENCE_META, OCCURRENCE_TYPES } from '../constants'
 import { totalOccurrences, type CollaboratorStats } from '../metrics'
 import type { OccurrenceType } from '../types'
-import { Avatar, RiskBadge, SegmentedBar } from './atoms'
+import { Avatar, RiskBadge } from './atoms'
 
-type SortKey = 'risk' | OccurrenceType | 'punctuality'
+type SortKey = 'risk' | OccurrenceType
 type TypeFilter = 'todos' | OccurrenceType
 
 const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
   { value: 'risk', label: 'Risco' },
   ...OCCURRENCE_TYPES.map((t) => ({ value: t, label: OCCURRENCE_META[t].plural })),
-  { value: 'punctuality', label: 'Pontualidade' },
 ]
 
 function sortStats(list: CollaboratorStats[], key: SortKey): CollaboratorStats[] {
   return [...list].sort((a, b) => {
     if (key === 'risk') return b.riskScore - a.riskScore
-    if (key === 'punctuality') return a.punctualityRate - b.punctualityRate
     return b.occurrences[key] - a.occurrences[key]
   })
 }
@@ -101,7 +99,6 @@ export function CollaboratorTable({
                   {OCCURRENCE_META[t].plural}
                 </th>
               ))}
-              <th className="px-4 py-3">Ponto</th>
               <th className="px-4 py-3">Status</th>
             </tr>
           </thead>
@@ -134,22 +131,6 @@ export function CollaboratorTable({
                     <CountCell value={s.occurrences[t]} color={OCCURRENCE_META[t].color} bg={OCCURRENCE_META[t].bg} />
                   </td>
                 ))}
-                <td className="px-4 py-3">
-                  <div className="w-32">
-                    <SegmentedBar
-                      height={6}
-                      segments={PUNCTUALITY_STATUSES.map((st) => ({
-                        key: st,
-                        label: PUNCTUALITY_META[st].label,
-                        value: s.punctuality[st],
-                        color: PUNCTUALITY_META[st].color,
-                      }))}
-                    />
-                    <p className="mt-1 text-[10.5px] font-semibold text-[var(--pv-muted)]">
-                      {s.punctualityRate}% folga · {s.punctuality.atrasado} atrasos
-                    </p>
-                  </div>
-                </td>
                 <td className="px-4 py-3">
                   <RiskBadge level={s.riskLevel} />
                 </td>

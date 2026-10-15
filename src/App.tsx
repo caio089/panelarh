@@ -13,7 +13,6 @@ import { AdminVagasListPage, AdminCandidatesPage } from '@/pages/AdminListsPage'
 import { AdminUnitsPage } from '@/pages/AdminUnitsPage'
 import { AdminSelectionPage } from '@/pages/AdminSelectionPage'
 import { OwnerDashboardPage } from '@/pages/OwnerDashboardPage'
-import { TimeClockPage } from '@/pages/TimeClockPage'
 import { ManagersPage } from '@/pages/ManagersPage'
 import { UnitLayout } from '@/pages/unit/UnitLayout'
 import { UnitOverviewTab } from '@/pages/unit/UnitOverviewTab'
@@ -46,7 +45,7 @@ export default function App() {
                   <Route path="colaboradores" element={<UnitCollaboratorsTab />} />
                   <Route path="escala" element={<UnitScheduleTab />} />
                 </Route>
-                <Route path="ponto" element={<TimeClockPage />} />
+                <Route path="ponto" element={<Navigate to="/admin" replace />} />
                 <Route path="gerentes" element={<ManagersPage />} />
                 <Route path="rh" element={<AdminDashboardPage />} />
                 <Route path="quadro" element={<AdminBoardPage />} />

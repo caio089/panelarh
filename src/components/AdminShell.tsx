@@ -8,7 +8,6 @@ import {
   Sparkles,
   LogOut,
   ExternalLink,
-  Clock,
   UserCog,
   Store,
   PieChart,
@@ -38,7 +37,6 @@ const STATIC_GROUPS: NavGroup[] = [
     title: 'Gestão',
     items: [
       { to: '/admin', end: true, label: 'Visão geral', icon: LayoutDashboard },
-      { to: '/admin/ponto', label: 'Ponto eletrônico', icon: Clock },
       { to: '/admin/gerentes', label: 'Gerentes', icon: UserCog },
     ],
   },

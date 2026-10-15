@@ -10,8 +10,6 @@ export function RhSummary({ view }: { view: GestaoView }) {
   const { store } = useData()
   const counts = countByStatus(store.candidatos)
   const openJobs = store.vagas.filter((vaga) => vaga.ativa).length
-  const late = view.punctuality.atrasado
-
   return (
     <section className="rounded-[28px] bg-[var(--pv-surface)] p-5 shadow-xl sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -38,8 +36,7 @@ export function RhSummary({ view }: { view: GestaoView }) {
         ))}
       </div>
 
-      <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
-        <Fact label="Atrasos no ponto" value={late} to="/admin/ponto" />
+      <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
         <Fact label="Vagas abertas" value={openJobs} to="/admin/vagas" />
         <Fact label="Candidatos" value={store.candidatos.length} to="/admin/candidatos" hint={`${counts.pendente} a chamar`} />
       </dl>

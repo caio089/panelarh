@@ -112,7 +112,7 @@ export function UnitCollaboratorsTab() {
 
       <SectionCard
         title="Colaboradores"
-        subtitle="Cadastro usado no ponto, nas ocorrências e na escala da semana"
+        subtitle="Cadastro usado nas ocorrências e na escala da semana"
         action={
           <Button onClick={openNew}>
             <Plus size={16} /> Novo colaborador
@@ -248,7 +248,7 @@ export function UnitCollaboratorsTab() {
           </table>
         </div>
         <p className="mt-2 text-[11px] text-[#A9A493]">
-          Inativar mantém o histórico (faltas, ponto) e tira a pessoa das próximas escalas. Excluir apaga o cadastro.
+          Inativar mantém o histórico de faltas e tira a pessoa das próximas escalas. Excluir apaga o cadastro.
         </p>
       </SectionCard>
 

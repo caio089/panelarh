@@ -1,12 +1,9 @@
-import { Clock } from 'lucide-react'
 import { Modal } from '@/components/ui'
-import { OCCURRENCE_META, OCCURRENCE_TYPES, PUNCTUALITY_META } from '../constants'
-import { formatShortDate, shiftTime } from '../dateUtils'
-import { classifyPunctuality, filterByRange, type CollaboratorStats, type DateRange } from '../metrics'
+import { OCCURRENCE_META, OCCURRENCE_TYPES } from '../constants'
+import { formatShortDate } from '../dateUtils'
+import { filterByRange, type CollaboratorStats, type DateRange } from '../metrics'
 import type { GestaoDataset } from '../types'
 import { Avatar, RiskBadge } from './atoms'
-
-const RECENT_PUNCHES = 8
 
 interface CollaboratorDetailModalProps {
   stats: CollaboratorStats | null
@@ -16,7 +13,7 @@ interface CollaboratorDetailModalProps {
   onClose: () => void
 }
 
-/** Ficha do colaborador: ocorrências do período e últimas batidas de ponto. */
+/** Ficha do colaborador: ocorrências do período. */
 export function CollaboratorDetailModal({ stats, dataset, range, unitName, onClose }: CollaboratorDetailModalProps) {
   if (!stats) return null
   const { colaborador } = stats
@@ -25,11 +22,6 @@ export function CollaboratorDetailModal({ stats, dataset, range, unitName, onClo
     dataset.ocorrencias.filter((o) => o.colaboradorId === colaborador.id),
     range,
   ).sort((a, b) => b.data.localeCompare(a.data))
-
-  const punches = dataset.pontos
-    .filter((p) => p.colaboradorId === colaborador.id)
-    .sort((a, b) => b.data.localeCompare(a.data))
-    .slice(0, RECENT_PUNCHES)
 
   return (
     <Modal open title="Ficha do colaborador" onClose={onClose} wide>
@@ -54,12 +46,6 @@ export function CollaboratorDetailModal({ stats, dataset, range, unitName, onClo
             <p className="mt-1 text-[10px] font-bold uppercase text-[var(--pv-muted)]">{OCCURRENCE_META[t].short}</p>
           </div>
         ))}
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniStat label="Com folga" value={`${stats.punctualityRate}%`} color={PUNCTUALITY_META.pontual.color} />
-        <MiniStat label="Atrasos" value={String(stats.punctuality.atrasado)} color={PUNCTUALITY_META.atrasado.color} />
-        <MiniStat label="Atraso médio" value={`${stats.averageDelayMin} min`} color="var(--pv-navy)" />
       </div>
 
       <h4 className="mt-6 text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-muted)]">Histórico no período</h4>
@@ -91,38 +77,6 @@ export function CollaboratorDetailModal({ stats, dataset, range, unitName, onClo
         </ol>
       )}
 
-      <h4 className="mt-6 text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-muted)]">Últimas batidas de entrada</h4>
-      <ul className="mt-2 divide-y divide-[var(--pv-line)] rounded-xl border border-[var(--pv-line)] bg-white">
-        {punches.map((p) => {
-          const status = classifyPunctuality(p.diferencaMin)
-          return (
-            <li key={p.data} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <span className="font-semibold text-[var(--pv-ink)]">{formatShortDate(p.data)}</span>
-              <span className="flex items-center gap-1.5 text-[var(--pv-muted)]">
-                <Clock size={13} /> {shiftTime(p.entradaPrevista, p.diferencaMin)}
-                <span className="text-[11px] text-[#A9A493]">(prev. {p.entradaPrevista})</span>
-              </span>
-              <span
-                className="rounded-md px-2 py-0.5 text-[10.5px] font-bold"
-                style={{ background: PUNCTUALITY_META[status].bg, color: PUNCTUALITY_META[status].color }}
-              >
-                {p.diferencaMin > 0 ? `+${p.diferencaMin} min` : `${p.diferencaMin} min`}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
     </Modal>
-  )
-}
-
-function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="rounded-xl border border-[var(--pv-line)] bg-white px-2 py-2.5">
-      <p className="font-display text-lg" style={{ color }}>
-        {value}
-      </p>
-      <p className="text-[10px] font-bold uppercase text-[var(--pv-muted)]">{label}</p>
-    </div>
   )
 }

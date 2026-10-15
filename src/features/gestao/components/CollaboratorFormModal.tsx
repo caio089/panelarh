@@ -99,7 +99,7 @@ function CollaboratorForm({ colaborador, unitName, onClose, onSubmit }: Collabor
           <Field label="Data de admissão" error={errors.admissao}>
             <Input type="date" value={values.admissao} onChange={(e) => update('admissao', e.target.value)} />
           </Field>
-          <Field label="Horário de entrada" error={errors.entradaPrevista} hint="Usado no controle de ponto">
+          <Field label="Horário de entrada" error={errors.entradaPrevista} hint="Horário previsto da escala">
             <Input type="time" value={values.entradaPrevista} onChange={(e) => update('entradaPrevista', e.target.value)} />
           </Field>
         </div>

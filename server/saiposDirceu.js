@@ -7,19 +7,30 @@ const SAIPOS_BASE = 'https://data.saipos.io/v1'
 const TIME_ZONE = 'America/Fortaleza'
 const PAGE_SIZE = 300
 const MAX_PAGES = 2
-const ATTEMPTS = 4
-const REQUEST_TIMEOUT_MS = 25000
+const ATTEMPTS = 2
+const REQUEST_TIMEOUT_MS = 18000
+const MAX_IN_FLIGHT = 2
 
-/** Uma consulta por vez: a Saipos devolve 504 se o pool de conexões enche. */
-let gate = Promise.resolve()
+/** No máximo duas consultas ao mesmo tempo: a Saipos devolve 504 se o pool enche. */
+let inFlight = 0
+const waiters = []
 
 function oneAtATime(task) {
-  const run = gate.then(task, task)
-  gate = run.then(
-    () => undefined,
-    () => undefined,
-  )
-  return run
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      inFlight += 1
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          inFlight -= 1
+          const next = waiters.shift()
+          if (next) next()
+        })
+    }
+    if (inFlight < MAX_IN_FLIGHT) run()
+    else waiters.push(run)
+  })
 }
 
 function sleep(ms) {
@@ -117,7 +128,7 @@ async function saiposGet(path, params, token, signal) {
     let lastMessage = 'A Saipos não respondeu.'
     for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
       if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
-      if (attempt > 0) await sleep(Math.min(8000, 700 * 2 ** (attempt - 1)))
+      if (attempt > 0) await sleep(600)
       if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
       try {
         const response = await fetchWithDeadline(url, token, signal)
@@ -192,24 +203,14 @@ function periodBounds(anchor, period, today) {
   return { start: day, end: day }
 }
 
-function dateChunks(start, end) {
-  const chunks = []
+function eachDay(start, end) {
+  const days = []
   let cursor = start
   while (cursor <= end) {
-    let chunkEnd = shiftIsoDate(cursor, 13)
-    if (chunkEnd > end) chunkEnd = end
-    chunks.push({ start: cursor, end: chunkEnd })
-    if (chunkEnd === end) break
-    cursor = shiftIsoDate(chunkEnd, 1)
+    days.push(cursor)
+    cursor = shiftIsoDate(cursor, 1)
   }
-  return chunks
-}
-
-function pageLimit(start, end) {
-  const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1
-  if (days <= 1) return 2
-  if (days <= 7) return 5
-  return 8
+  return days
 }
 
 function reportBody(day, period, bounds, category, rows, summarize, partial) {
@@ -551,6 +552,17 @@ function summarizeFinance(rows) {
 }
 
 const dayCache = new Map()
+const rawCache = new Map()
+const RAW_CACHE_LIMIT = 90
+
+function rememberRaw(key, rows) {
+  if (rawCache.has(key)) rawCache.delete(key)
+  rawCache.set(key, rows)
+  while (rawCache.size > RAW_CACHE_LIMIT) {
+    const oldest = rawCache.keys().next().value
+    rawCache.delete(oldest)
+  }
+}
 
 const CATEGORIES = {
   faturamento: { path: '/search_sales', filter: 'shift_date', summarize: (rows) => summarizeSales(rows) },
@@ -559,21 +571,66 @@ const CATEGORIES = {
   financeiro: { path: '/search_financial_transactions', filter: 'date', summarize: (rows) => summarizeFinance(rows) },
 }
 
-async function* loadRangeSteps(spec, start, end, token, signal) {
+async function loadOneDay(spec, day, token, signal) {
+  const key = `${spec.path}:${spec.filter}:${day}`
+  if (rawCache.has(key)) return rawCache.get(key)
   const rows = []
-  const chunks = dateChunks(start, end)
-  for (let index = 0; index < chunks.length; index += 1) {
-    const chunk = chunks[index]
-    for await (const page of saiposPages(
-      spec.path,
-      { p_date_column_filter: spec.filter, ...dayRange(chunk.start, chunk.end) },
-      token,
-      signal,
-      pageLimit(chunk.start, chunk.end),
-    )) {
-      rows.push(...page.batch)
-      const finished = page.last && index === chunks.length - 1
-      yield { rows, partial: !finished }
+  for await (const page of saiposPages(
+    spec.path,
+    { p_date_column_filter: spec.filter, ...dayRange(day, day) },
+    token,
+    signal,
+    2,
+  )) {
+    rows.push(...page.batch)
+    if (page.last) break
+  }
+  rememberRaw(key, rows)
+  return rows
+}
+
+async function* loadRangeSteps(spec, start, end, token, signal) {
+  const days = eachDay(start, end)
+  const collected = new Map()
+  const queue = []
+  let waiting = null
+  const wake = () => {
+    waiting?.()
+    waiting = null
+  }
+
+  for (const [index, day] of days.entries()) {
+    void loadOneDay(spec, day, token, signal).then(
+      (rows) => {
+        queue.push({ index, rows })
+        wake()
+      },
+      (error) => {
+        queue.push({ index, error })
+        wake()
+      },
+    )
+  }
+
+  let received = 0
+  while (received < days.length) {
+    if (queue.length === 0) {
+      await new Promise((resolve) => {
+        waiting = resolve
+        if (queue.length > 0) wake()
+      })
+    }
+    while (queue.length > 0) {
+      const item = queue.shift()
+      if (item.error) throw item.error
+      received += 1
+      collected.set(item.index, item.rows)
+      const rows = []
+      for (let index = 0; index < days.length; index += 1) {
+        const batch = collected.get(index)
+        if (batch) rows.push(...batch)
+      }
+      yield { rows, partial: received < days.length }
     }
   }
 }
