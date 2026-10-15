@@ -17,7 +17,7 @@ export interface ApplyDraft {
   personal: { full_name: string; cpf: string; phone: string; city: string }
   job: { preferred_unit: string; weekend: string; commute: string }
   shifts: string[]
-  experience: { worked: string; detail: string; start: string }
+  experience: { worked: string; detail: string; daily: string; why: string; start: string }
 }
 
 const DRAFT_PREFIX = 'panela-apply-draft:'
@@ -49,6 +49,8 @@ export function loadApplyDraft(vagaId: string): ApplyDraft | null {
       experience: {
         worked: String(parsed.experience.worked || ''),
         detail: String(parsed.experience.detail || ''),
+        daily: String(parsed.experience.daily || ''),
+        why: String(parsed.experience.why || ''),
         start: String(parsed.experience.start || ''),
       },
     }

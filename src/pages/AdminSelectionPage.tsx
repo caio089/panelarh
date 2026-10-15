@@ -3,7 +3,7 @@ import { Brain, MessageCircle, Sparkles, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { scoreCandidateForVaga, explainSelection } from '@/lib/aiSelection'
-import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat } from '@/lib/whatsapp'
+import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { Button, Field, Input, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
 import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
@@ -19,7 +19,7 @@ type Ranked = {
 
 export function AdminSelectionPage() {
   const { isAdmin, isRh, profile: authProfile, user } = useAuth()
-  const { store, updateCandidatoStatus, sendMessage } = useData()
+  const { store, finishVagaSelection, sendMessage } = useData()
 
   const units = useMemo(() => {
     if (isAdmin || isRh) return store.units
@@ -39,12 +39,13 @@ export function AdminSelectionPage() {
   const [aiWhy, setAiWhy] = useState<{ headline: string; summary: string; picks: string[] } | null>(
     null,
   )
+  const [pendingChoice, setPendingChoice] = useState<Ranked | null>(null)
 
   useEffect(() => {
     if (!unitId && units[0]?.id) setUnitId(units[0].id)
   }, [units, unitId])
 
-  const vagas = store.vagas.filter((v) => v.unit_id === unitId)
+  const vagas = store.vagas.filter((v) => v.unit_id === unitId && v.ativa !== false)
   const vaga = store.vagas.find((v) => v.id === vagaId)
 
   const allForVaga = useMemo(() => {
@@ -70,6 +71,7 @@ export function AdminSelectionPage() {
     setSelectedIds([])
     setRound(0)
     setAiWhy(null)
+    setPendingChoice(null)
   }
 
   function onPickVaga(id: string) {
@@ -78,6 +80,7 @@ export function AdminSelectionPage() {
     setSelectedIds([])
     setRound(0)
     setAiWhy(null)
+    setPendingChoice(null)
   }
 
   const requestedCount = Math.max(1, Math.min(50, Number(askCount) || 3))
@@ -130,6 +133,24 @@ export function AdminSelectionPage() {
     if (user) sendMessage(candidatoId, user.id, body)
   }
 
+  function chooseAndClose(item: Ranked) {
+    if (item.vaga.ativa === false) return
+    setPendingChoice(item)
+  }
+
+  function confirmChoice() {
+    if (!pendingChoice || pendingChoice.vaga.ativa === false) return
+    const result = finishVagaSelection(pendingChoice.vaga.id, pendingChoice.candidato.id)
+    setPendingChoice(null)
+    if ('error' in result) {
+      window.alert(result.error)
+      return
+    }
+    setCut(null)
+    setSelectedIds([])
+    setAiWhy(null)
+  }
+
   function openDetail(item: Ranked) {
     const unit = store.units.find((u) => u.id === item.vaga.unit_id)
     setDetail({
@@ -155,7 +176,7 @@ export function AdminSelectionPage() {
       <PageHeader
         eyebrow="Panela AI"
         title="Seleção inteligente"
-        description="Diga quantas pessoas você quer. A IA escolhe e explica por que esses nomes avançaram."
+        description="Escolha uma pessoa para a vaga aberta. Ao confirmar, a seleção acaba, a vaga fecha e os demais vão para o banco de talentos."
       />
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-br from-[#1B2A57] to-[#121D40] p-5 sm:p-6">
@@ -181,6 +202,9 @@ export function AdminSelectionPage() {
                   {v.titulo}
                 </option>
               ))}
+              {vaga && vaga.ativa === false ? (
+                <option value={vaga.id}>{vaga.titulo} · encerrada</option>
+              ) : null}
             </Select>
           </Field>
           <Field label="Quantas pessoas selecionar?" labelClassName="text-[#EFE3C4]">
@@ -211,7 +235,7 @@ export function AdminSelectionPage() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
-            disabled={!vagaId || analyzing || allForVaga.length === 0}
+            disabled={!vagaId || analyzing || allForVaga.length === 0 || vaga?.ativa === false}
             onClick={() => runAiCut(requestedCount)}
           >
             <Sparkles size={15} />
@@ -299,7 +323,89 @@ export function AdminSelectionPage() {
         </div>
       ) : null}
 
-      {!analyzing && vagaId && displayed.length > 0 ? (
+      {pendingChoice && pendingChoice.vaga.ativa !== false ? (
+        <section className="mt-6 rounded-2xl border border-[var(--pv-terracotta)] bg-[#FBF9F3] p-5 shadow-xl">
+          <p className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
+            Confirmar escolha
+          </p>
+          <h2 className="mt-2 font-display text-2xl text-[var(--pv-ink)]">{pendingChoice.candidato.nome}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-[#4A4636]">
+            Esta pessoa fica escolhida na vaga <strong>{pendingChoice.vaga.titulo}</strong>. A seleção acaba, a vaga
+            fecha e sai do site.
+            {store.candidatos.filter(
+              (candidato) =>
+                candidato.vaga_id === pendingChoice.vaga.id &&
+                candidato.id !== pendingChoice.candidato.id &&
+                (candidato.status === 'pendente' || candidato.status === 'entrevista'),
+            ).length > 0
+              ? ' Quem não foi escolhido vai para o banco de talentos.'
+              : ''}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={confirmChoice}>Confirmar e fechar vaga</Button>
+            <Button variant="ghost" onClick={() => setPendingChoice(null)}>
+              Cancelar
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {!analyzing && vaga && vaga.ativa === false ? (
+        <section className="mt-6 rounded-2xl border border-[#E4F3E9] bg-[#FBF9F3] p-6 shadow-xl">
+          <p className="text-[11px] font-bold uppercase tracking-[1px] text-[#2F7D4F]">Seleção encerrada</p>
+          <h2 className="mt-2 font-display text-2xl text-[var(--pv-ink)]">
+            {store.candidatos.find((candidato) => candidato.vaga_id === vaga.id && candidato.status === 'aprovada')
+              ?.nome || 'A pessoa escolhida'}{' '}
+            foi escolhida
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-[#4A4636]">
+            A vaga <strong>{vaga.titulo}</strong> fechou e saiu do site. Quem não foi escolhido está no banco de
+            talentos.
+          </p>
+          <ul className="mt-4 space-y-2 text-sm text-[#4A4636]">
+            {store.candidatos
+              .filter((candidato) => candidato.vaga_id === vaga.id && candidato.status === 'aprovada')
+              .map((candidato) => (
+                <li key={candidato.id} className="rounded-xl bg-[#E4F3E9] px-3 py-2 font-semibold text-[#2F7D4F]">
+                  Escolhida: {candidato.nome}
+                </li>
+              ))}
+            {store.candidatos
+              .filter((candidato) => candidato.vaga_id === vaga.id && candidato.status === 'banco')
+              .map((candidato) => (
+                <li key={candidato.id} className="rounded-xl bg-[#FBF1DC] px-3 py-2">
+                  Banco de talentos: {candidato.nome}
+                </li>
+              ))}
+          </ul>
+          {store.candidatos.some(
+            (candidato) => candidato.vaga_id === vaga.id && candidato.status === 'aprovada',
+          ) ? (
+            <Button
+              className="mt-4"
+              onClick={() => {
+                const chosen = store.candidatos.find(
+                  (candidato) => candidato.vaga_id === vaga.id && candidato.status === 'aprovada',
+                )
+                if (!chosen) return
+                notifyWhatsApp(
+                  chosen.id,
+                  phoneFromCandidatoInfo(chosen.info_complementar),
+                  whatsAppMessageForStatus({
+                    nome: chosen.nome,
+                    vaga: vaga.titulo,
+                    status: 'aprovada',
+                  }),
+                )
+              }}
+            >
+              <MessageCircle size={14} /> Avisar a pessoa escolhida
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+
+      {!analyzing && vaga?.ativa !== false && vagaId && displayed.length > 0 ? (
         <section className="mt-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display text-xl text-[#F7F4EC]">
@@ -385,6 +491,9 @@ export function AdminSelectionPage() {
                     </button>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => chooseAndClose(item)}>
+                      Escolher e fechar vaga
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
                       <UserRound size={14} /> Ver perfil
                     </Button>
@@ -414,34 +523,28 @@ export function AdminSelectionPage() {
             <div className="mt-3">
               <Textarea rows={3} value={waMsg} onChange={(e) => setWaMsg(e.target.value)} />
             </div>
-            {winner ? (
+            {winner && winner.vaga.ativa !== false ? (
               <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#E4F3E9] bg-[#E4F3E9]/50 p-4">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-[#2F7D4F]">Escolhido: {winner.candidato.nome}</p>
                   <p className="text-xs text-[var(--pv-muted)]">
-                    Match {winner.score}% · pode avançar no pipeline
+                    Confirmar encerra a seleção, fecha a vaga e manda os demais para o banco de talentos.
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    updateCandidatoStatus(winner.candidato.id, 'entrevista')
-                    notifyWhatsApp(
-                      winner.candidato.id,
-                      phoneFromCandidatoInfo(winner.candidato.info_complementar, winner.profile?.phone),
-                      waMsg,
-                    )
-                  }}
-                >
-                  Avançar + WhatsApp
+                <Button size="sm" onClick={() => chooseAndClose(winner)}>
+                  Escolher e fechar vaga
                 </Button>
               </div>
-            ) : null}
+            ) : (
+              <p className="mt-4 text-sm text-[var(--pv-muted)]">
+                Marque uma pessoa para escolher. A vaga só fecha depois dessa confirmação.
+              </p>
+            )}
           </div>
         </section>
       ) : null}
 
-      {!analyzing && vagaId && displayed.length === 0 ? (
+      {!analyzing && vaga?.ativa !== false && vagaId && displayed.length === 0 ? (
         <div className="mt-10 rounded-2xl border border-dashed border-white/20 px-6 py-14 text-center text-[#EFE3C4]">
           <Sparkles className="mx-auto mb-3 text-[var(--pv-terracotta)]" />
           <p className="font-display text-lg text-white">Nenhum candidato nesta vaga</p>

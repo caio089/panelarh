@@ -42,7 +42,7 @@ export function PublicApplyPage() {
   )
   const [shifts, setShifts] = useState<string[]>(saved?.shifts ?? [])
   const [experience, setExperience] = useState(
-    saved?.experience ?? { worked: '', detail: '', start: '' },
+    saved?.experience ?? { worked: '', detail: '', daily: '', why: '', start: '' },
   )
 
   const progress = useMemo(() => ((step + 1) / STEPS.length) * 100, [step])
@@ -97,16 +97,12 @@ export function PublicApplyPage() {
       if (!experience.worked || !experience.start) {
         throw new Error('Diga se já trabalhou em restaurante e quando pode começar.')
       }
-      if (experience.worked === 'Sim' && experience.detail.trim().length < 8) {
-        throw new Error('Conte em uma frase onde trabalhou e o que fazia.')
+      if (experience.detail.trim().length < 20 || experience.daily.trim().length < 20 || experience.why.trim().length < 20) {
+        throw new Error('Escreva um pouco mais nos três textos. O RH precisa entender seu trabalho.')
       }
 
       if (!vaga || !id) return
       setSaving(true)
-      const detail =
-        experience.worked === 'Sim'
-          ? experience.detail.trim()
-          : 'Ainda não trabalhou em restaurante.'
       const result = await submitPublicApplication({
         vagaId: vaga.id,
         nome: personal.full_name.trim(),
@@ -117,8 +113,10 @@ export function PublicApplyPage() {
         shifts: shifts.join(', '),
         weekendAvailability: job.weekend,
         commute: job.commute,
-        workedRestaurant: experience.worked === 'Sim' ? `Sim — ${detail}` : 'Ainda não',
-        experience: detail,
+        workedRestaurant: experience.worked,
+        experience: experience.detail.trim(),
+        dailyWork: experience.daily.trim(),
+        whyRole: experience.why.trim(),
         startWhen: experience.start,
       })
       setSaving(false)
@@ -285,16 +283,33 @@ export function PublicApplyPage() {
                   options={RESTAURANT_OPTIONS}
                   onChange={(worked) => setExperience({ ...experience, worked })}
                 />
-                {experience.worked === 'Sim' ? (
-                  <Field label="Onde foi e o que você fazia? *" hint="Uma frase basta">
-                    <Textarea
-                      rows={3}
-                      value={experience.detail}
-                      onChange={(event) => setExperience({ ...experience, detail: event.target.value })}
-                      placeholder="Ex.: Atendente no salão da casa do centro, por um ano."
-                    />
-                  </Field>
-                ) : null}
+                <Field
+                  label="Último trabalho *"
+                  hint="Casa, função e por quanto tempo. Se for o primeiro, escreva isso."
+                >
+                  <Textarea
+                    rows={3}
+                    value={experience.detail}
+                    onChange={(event) => setExperience({ ...experience, detail: event.target.value })}
+                    placeholder="Ex.: Atendente no salão do restaurante do centro, de 2023 a 2024."
+                  />
+                </Field>
+                <Field label="O que você fazia no dia a dia? *" hint="Duas ou três frases, com o que o RH precisa saber.">
+                  <Textarea
+                    rows={3}
+                    value={experience.daily}
+                    onChange={(event) => setExperience({ ...experience, daily: event.target.value })}
+                    placeholder="Ex.: Anotava pedidos, servia mesas e fechava a conta no caixa."
+                  />
+                </Field>
+                <Field label="Por que quer esta vaga? *">
+                  <Textarea
+                    rows={3}
+                    value={experience.why}
+                    onChange={(event) => setExperience({ ...experience, why: event.target.value })}
+                    placeholder="Ex.: Quero trabalhar no atendimento da unidade do Dirceu e aprender o ritmo da casa."
+                  />
+                </Field>
                 <Choices
                   label="Quando pode começar? *"
                   value={experience.start}

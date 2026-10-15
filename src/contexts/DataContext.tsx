@@ -54,6 +54,8 @@ interface PublicApplicationInput {
   commute: string
   workedRestaurant: string
   experience: string
+  dailyWork: string
+  whyRole: string
   startWhen: string
 }
 
@@ -64,6 +66,10 @@ interface DataContextValue {
   updateVaga: (vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => void
   deleteVaga: (vagaId: string) => void
   updateCandidatoStatus: (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => void
+  finishVagaSelection: (
+    vagaId: string,
+    candidatoId: string,
+  ) => { chosenName: string; parked: number } | { error: string }
   deleteCandidato: (candidatoId: string) => void
   submitPublicApplication: (input: PublicApplicationInput) => Promise<{ error?: string; candidatoId?: string }>
   sendMessage: (candidatoId: string, senderId: string, body: string) => void
@@ -88,6 +94,10 @@ function unitNameTaken(units: Unit[], name: string, ignoreId?: string) {
   return units.some((u) => u.id !== ignoreId && u.name.toLowerCase() === normalized)
 }
 
+function oneLine(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
 function buildPublicApplicationInfo(input: PublicApplicationInput) {
   return [
     `WhatsApp: ${input.phone}`,
@@ -98,6 +108,9 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
     `Fim de semana: ${input.weekendAvailability}`,
     `Como chega: ${input.commute}`,
     `Restaurante: ${input.workedRestaurant}`,
+    `Último trabalho: ${oneLine(input.experience)}`,
+    `No dia a dia: ${oneLine(input.dailyWork)}`,
+    `Por que a vaga: ${oneLine(input.whyRole)}`,
     `Começa: ${input.startWhen}`,
   ].join('\n')
 }
@@ -184,6 +197,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
     },
     [],
   )
+
+  const finishVagaSelection = useCallback((vagaId: string, candidatoId: string) => {
+    let result: { chosenName: string; parked: number } | { error: string } = {
+      error: 'Não foi possível encerrar a seleção.',
+    }
+    setStore((prev) => {
+      const vaga = prev.vagas.find((item) => item.id === vagaId)
+      const chosen = prev.candidatos.find((item) => item.id === candidatoId && item.vaga_id === vagaId)
+      if (!vaga || !chosen) {
+        result = { error: 'Vaga ou candidato não encontrado.' }
+        return prev
+      }
+      if (vaga.ativa === false) {
+        result = { error: 'Esta vaga já está encerrada.' }
+        return prev
+      }
+      let parked = 0
+      const candidatos = prev.candidatos.map((item) => {
+        if (item.vaga_id !== vagaId) return item
+        if (item.id === candidatoId) {
+          return { ...item, status: 'aprovada' as const, data_inicio_treinamento: null }
+        }
+        if (item.status === 'pendente' || item.status === 'entrevista') {
+          parked += 1
+          return { ...item, status: 'banco' as const, data_inicio_treinamento: null }
+        }
+        return item
+      })
+      result = { chosenName: chosen.nome, parked }
+      return {
+        ...prev,
+        vagas: prev.vagas.map((item) => (item.id === vagaId ? { ...item, ativa: false } : item)),
+        candidatos,
+      }
+    })
+    return result
+  }, [])
 
   const deleteCandidato = useCallback((candidatoId: string) => {
     setStore((prev) => ({
@@ -305,6 +355,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateVaga,
       deleteVaga,
       updateCandidatoStatus,
+      finishVagaSelection,
       deleteCandidato,
       submitPublicApplication,
       sendMessage,
@@ -321,6 +372,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateVaga,
       deleteVaga,
       updateCandidatoStatus,
+      finishVagaSelection,
       deleteCandidato,
       submitPublicApplication,
       sendMessage,

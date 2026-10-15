@@ -58,7 +58,7 @@ const RH_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/rh', label: 'Painel', icon: PieChart },
       { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
-      { to: '/admin/quadro', label: 'Quadro', icon: KanbanSquare },
+      { to: '/admin/quadro', label: 'Pipeline', icon: KanbanSquare },
       { to: '/admin/candidatos', label: 'Candidatos', icon: Users },
       { to: '/admin/selecao', label: 'Seleção', icon: Sparkles },
     ],

@@ -43,11 +43,15 @@ export function ProfileAnswers({
     return <p className="text-sm italic text-[#A9A493]">Sem dados de perfil</p>
   }
 
-  const rows = rowsFromCandidatoInfo(candidato.info_complementar).filter(
-    ([label]) => !['Sobre', 'Motivação'].includes(label) && !label.toLowerCase().startsWith('disc'),
+  const storyLabels = ['Sobre', 'Motivação', 'Último trabalho', 'No dia a dia', 'Por que a vaga']
+  const infoRows = rowsFromCandidatoInfo(candidato.info_complementar)
+  const rows = infoRows.filter(
+    ([label]) => !storyLabels.includes(label) && !label.toLowerCase().startsWith('disc'),
   )
-  const about = rowsFromCandidatoInfo(candidato.info_complementar).find(([l]) => l === 'Sobre')?.[1]
-  const why = rowsFromCandidatoInfo(candidato.info_complementar).find(([l]) => l === 'Motivação')?.[1]
+  const about = infoRows.find(([label]) => label === 'Sobre')?.[1]
+  const why = infoRows.find(([label]) => label === 'Motivação' || label === 'Por que a vaga')?.[1]
+  const lastJob = infoRows.find(([label]) => label === 'Último trabalho')?.[1]
+  const daily = infoRows.find(([label]) => label === 'No dia a dia')?.[1]
 
   return (
     <div className="space-y-3 text-sm text-[#4A4636]">
@@ -62,8 +66,10 @@ export function ProfileAnswers({
         ))}
       </div>
       {about ? <Block title="Sobre a pessoa" text={about} /> : null}
-      {candidato.experiencia ? <Block title="Experiência relevante" text={candidato.experiencia} /> : null}
-      {why ? <Block title="Por que a Panela Velha" text={why} /> : null}
+      {lastJob ? <Block title="Último trabalho" text={lastJob} /> : null}
+      {!lastJob && candidato.experiencia ? <Block title="Experiência relevante" text={candidato.experiencia} /> : null}
+      {daily ? <Block title="No dia a dia" text={daily} /> : null}
+      {why ? <Block title="Por que a vaga" text={why} /> : null}
     </div>
   )
 }

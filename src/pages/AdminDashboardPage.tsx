@@ -21,6 +21,7 @@ import { STATUS_META, type CandidateStatus, type Candidato } from '@/types'
 import { formatDateBR } from '@/lib/utils'
 import { PageHeader, StatusPill } from '@/components/ui'
 import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
+import { VagaPipeline } from '@/components/VagaPipeline'
 
 export function AdminDashboardPage() {
   const { isAdmin, isRh, profile } = useAuth()
@@ -121,6 +122,31 @@ export function AdminDashboardPage() {
           }
         />
       </div>
+
+      <section className="mt-6 space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <h2 className="font-display text-2xl text-[#F7F4EC]">Pipeline das vagas</h2>
+          <Link to="/admin/quadro" className="text-sm font-semibold text-[var(--pv-cream)]">
+            Ver todas →
+          </Link>
+        </div>
+        {vagas.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-white/20 px-4 py-8 text-center text-sm text-[#EFE3C4]">
+            Nenhuma vaga ainda. Abra uma vaga para acompanhar os candidatos aqui.
+          </p>
+        ) : (
+          [...vagas]
+            .sort((a, b) => Number(b.ativa !== false) - Number(a.ativa !== false))
+            .map((vaga) => (
+              <VagaPipeline
+                key={vaga.id}
+                vaga={vaga}
+                unitName={store.units.find((unit) => unit.id === vaga.unit_id)?.name}
+                candidatos={candidatos.filter((candidato) => candidato.vaga_id === vaga.id)}
+              />
+            ))
+        )}
+      </section>
 
       <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#1B2A57] via-[#172448] to-[#121D40] p-5 sm:p-6">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[var(--pv-terracotta)]/20 blur-3xl" />
