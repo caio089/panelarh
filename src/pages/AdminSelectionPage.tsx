@@ -18,14 +18,14 @@ type Ranked = {
 }
 
 export function AdminSelectionPage() {
-  const { isAdmin, profile: authProfile, user } = useAuth()
+  const { isAdmin, isRh, profile: authProfile, user } = useAuth()
   const { store, updateCandidatoStatus, sendMessage } = useData()
 
   const units = useMemo(() => {
-    if (isAdmin) return store.units
+    if (isAdmin || isRh) return store.units
     const id = authProfile?.unit_id || store.units[0]?.id
     return store.units.filter((u) => u.id === id)
-  }, [store.units, isAdmin, authProfile])
+  }, [store.units, isAdmin, isRh, authProfile])
 
   const [unitId, setUnitId] = useState(units[0]?.id || '')
   const [vagaId, setVagaId] = useState('')
@@ -50,7 +50,7 @@ export function AdminSelectionPage() {
   const allForVaga = useMemo(() => {
     if (!vaga) return [] as Ranked[]
     return store.candidatos
-      .filter((c) => c.vaga_id === vaga.id && c.status !== 'reprovada')
+      .filter((c) => c.vaga_id === vaga.id && c.status !== 'reprovada' && c.status !== 'banco')
       .map((c) => {
         const p = store.profiles.find((x) => x.id === c.profile_id) || null
         const exps = store.experiences.filter((e) => e.profile_id === c.profile_id).length
@@ -264,7 +264,7 @@ export function AdminSelectionPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {vagas.map((v) => {
                 const count = store.candidatos.filter(
-                  (c) => c.vaga_id === v.id && c.status !== 'reprovada',
+                  (c) => c.vaga_id === v.id && c.status !== 'reprovada' && c.status !== 'banco',
                 ).length
                 return (
                   <button
@@ -295,7 +295,7 @@ export function AdminSelectionPage() {
           <div className="pv-stamp-spin flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-[var(--pv-cream)]">
             <Brain size={22} />
           </div>
-          <p className="font-display text-lg">Cruzando DISC, experiências e requisitos…</p>
+          <p className="font-display text-lg">Cruzando experiência, horário e requisitos…</p>
         </div>
       ) : null}
 

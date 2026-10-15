@@ -1,7 +1,11 @@
-import { NavLink, Outlet, Navigate, Link } from 'react-router-dom'
+import { NavLink, Outlet, Navigate, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Building2,
+  Briefcase,
+  KanbanSquare,
+  Users,
+  Sparkles,
   LogOut,
   ExternalLink,
   Clock,
@@ -48,20 +52,48 @@ const STATIC_GROUPS: NavGroup[] = [
   },
 ]
 
+const RH_GROUPS: NavGroup[] = [
+  {
+    title: 'RH',
+    items: [
+      { to: '/admin/rh', label: 'Painel', icon: PieChart },
+      { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
+      { to: '/admin/quadro', label: 'Quadro', icon: KanbanSquare },
+      { to: '/admin/candidatos', label: 'Candidatos', icon: Users },
+      { to: '/admin/selecao', label: 'Seleção', icon: Sparkles },
+    ],
+  },
+]
+
+function isOwnerPath(pathname: string) {
+  return (
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/ponto') ||
+    pathname.startsWith('/admin/gerentes') ||
+    pathname.startsWith('/admin/unidades') ||
+    pathname.startsWith('/admin/unidade/')
+  )
+}
+
 export function AdminShell() {
-  const { loading, isStaff, isAdmin, signOut } = useAuth()
+  const { loading, isStaff, isAdmin, isRh, signOut } = useAuth()
   const { store } = useData()
+  const { pathname } = useLocation()
 
   if (loading) return <LoadingScreen text="Abrindo painel…" />
   if (!isStaff) return <Navigate to="/admin/login" replace />
+  if (isRh && isOwnerPath(pathname)) return <Navigate to="/admin/rh" replace />
 
   const unitGroup: NavGroup = {
     title: 'Unidades',
     items: store.units.map((u) => ({ to: `/admin/unidade/${u.id}`, label: u.name, icon: Store })),
   }
-  const groups = [STATIC_GROUPS[0], unitGroup, ...STATIC_GROUPS.slice(1)]
+  const groups = (isRh ? RH_GROUPS : [STATIC_GROUPS[0], unitGroup, ...STATIC_GROUPS.slice(1)])
     .map((g) => ({ ...g, items: g.items.filter((item) => !item.adminOnly || isAdmin) }))
     .filter((g) => g.items.length > 0)
+  const who = isRh
+    ? { title: 'Equipe de RH', detail: 'Recrutamento e seleção' }
+    : { title: 'Matheus & Andressa', detail: 'Sócios · acesso total' }
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[256px_1fr]">
@@ -70,12 +102,18 @@ export function AdminShell() {
           <BrandMark />
           <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-[rgba(239,227,196,0.2)] bg-[rgba(239,227,196,0.08)] px-3 py-2.5">
             <div className="flex -space-x-2">
-              <OwnerInitial letter="M" color="#E15B3F" />
-              <OwnerInitial letter="A" color="#3B6EA5" />
+              {isRh ? (
+                <OwnerInitial letter="R" color="#E15B3F" />
+              ) : (
+                <>
+                  <OwnerInitial letter="M" color="#E15B3F" />
+                  <OwnerInitial letter="A" color="#3B6EA5" />
+                </>
+              )}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[13px] font-semibold text-[#F7F4EC]">Matheus & Andressa</p>
-              <p className="mt-0.5 text-[11px] font-medium text-[var(--pv-cream)]/60">Sócios · acesso total</p>
+              <p className="truncate text-[13px] font-semibold text-[#F7F4EC]">{who.title}</p>
+              <p className="mt-0.5 text-[11px] font-medium text-[var(--pv-cream)]/60">{who.detail}</p>
             </div>
           </div>
         </div>
@@ -107,7 +145,7 @@ export function AdminShell() {
 
       <div className="min-w-0">
         <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3 lg:hidden">
-          <p className="truncate text-xs font-semibold text-[var(--pv-cream)]/70">Matheus & Andressa · Sócios</p>
+          <p className="truncate text-xs font-semibold text-[var(--pv-cream)]/70">{who.title}</p>
           <div className="flex gap-2">
             <Link to="/">
               <Button variant="outline" size="sm" aria-label="Site de vagas">

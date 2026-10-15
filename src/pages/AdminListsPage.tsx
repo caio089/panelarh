@@ -44,10 +44,10 @@ const emptyForm = (unitId = ''): VagaForm => ({
 })
 
 export function AdminVagasListPage() {
-  const { isAdmin, profile } = useAuth()
+  const { isAdmin, isRh, profile } = useAuth()
   const { store, addVaga, updateVaga, deleteVaga } = useData()
 
-  const unitIds = isAdmin
+  const unitIds = isAdmin || isRh
     ? store.units.map((u) => u.id)
     : [profile?.unit_id || store.units[0]?.id]
 
@@ -504,12 +504,12 @@ function VagaFormModal({
 }
 
 export function AdminCandidatesPage() {
-  const { isAdmin, profile } = useAuth()
+  const { isAdmin, isRh, profile } = useAuth()
   const { store } = useData()
 
   const unitIds = useMemo(
-    () => (isAdmin ? store.units.map((u) => u.id) : [profile?.unit_id || store.units[0]?.id]),
-    [isAdmin, profile?.unit_id, store.units],
+    () => (isAdmin || isRh ? store.units.map((u) => u.id) : [profile?.unit_id || store.units[0]?.id]),
+    [isAdmin, isRh, profile?.unit_id, store.units],
   )
 
   const scopedVagas = useMemo(

@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { BrandMark } from '@/components/Layout'
 import { Alert, Button, Field, Input } from '@/components/ui'
 export function AdminLoginPage() {
-  const { signIn, user, loading, isStaff } = useAuth()
+  const { signIn, user, loading, isStaff, isRh } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,9 +15,9 @@ export function AdminLoginPage() {
   useEffect(() => {
     if (loading || !user) return
     if (isStaff) {
-      navigate('/admin', { replace: true })
+      navigate(isRh ? '/admin/rh' : '/admin', { replace: true })
     }
-  }, [loading, user, isStaff, navigate])
+  }, [loading, user, isStaff, isRh, navigate])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()

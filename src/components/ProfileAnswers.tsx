@@ -44,7 +44,7 @@ export function ProfileAnswers({
   }
 
   const rows = rowsFromCandidatoInfo(candidato.info_complementar).filter(
-    ([label]) => !['Sobre', 'Motivação'].includes(label),
+    ([label]) => !['Sobre', 'Motivação'].includes(label) && !label.toLowerCase().startsWith('disc'),
   )
   const about = rowsFromCandidatoInfo(candidato.info_complementar).find(([l]) => l === 'Sobre')?.[1]
   const why = rowsFromCandidatoInfo(candidato.info_complementar).find(([l]) => l === 'Motivação')?.[1]

@@ -21,8 +21,12 @@ export function loadDemoStore(): AppStore {
       const parsed: unknown = JSON.parse(raw)
       if (isAppStore(parsed)) {
         const units = withHouseUnits(parsed.units)
-        if (units.length !== parsed.units.length) {
-          const next = { ...parsed, units }
+        const candidatos = parsed.candidatos.map((candidato) =>
+          candidato.status === 'reprovada' ? { ...candidato, status: 'banco' as const } : candidato,
+        )
+        const movedToBank = candidatos.some((candidato, index) => candidato !== parsed.candidatos[index])
+        if (units.length !== parsed.units.length || movedToBank) {
+          const next = { ...parsed, units, candidatos }
           saveDemoStore(next)
           return next
         }

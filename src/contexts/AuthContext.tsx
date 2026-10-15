@@ -8,11 +8,10 @@ import {
 } from 'react'
 import type { Profile } from '@/types'
 import {
-  DEMO_ADMIN_PROFILE,
-  DEMO_ADMIN_USER,
+  currentDemoSessionId,
+  demoAccountById,
   endDemoSession,
-  hasDemoSession,
-  isValidDemoLogin,
+  findDemoAccount,
   startDemoSession,
   type DemoUser,
 } from '@/lib/demo/auth'
@@ -25,36 +24,40 @@ interface AuthContextValue {
   signOut: () => Promise<void>
   isStaff: boolean
   isAdmin: boolean
+  isRh: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [loggedIn, setLoggedIn] = useState(() => hasDemoSession())
+  const [sessionId, setSessionId] = useState(() => currentDemoSessionId())
+  const account = demoAccountById(sessionId)
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!isValidDemoLogin(email, password)) return { error: 'E-mail ou senha inválidos.' }
-    startDemoSession()
-    setLoggedIn(true)
+    const next = findDemoAccount(email, password)
+    if (!next) return { error: 'E-mail ou senha inválidos.' }
+    startDemoSession(next.user.id)
+    setSessionId(next.user.id)
     return {}
   }, [])
 
   const signOut = useCallback(async () => {
     endDemoSession()
-    setLoggedIn(false)
+    setSessionId(null)
   }, [])
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      user: loggedIn ? DEMO_ADMIN_USER : null,
-      profile: loggedIn ? DEMO_ADMIN_PROFILE : null,
+      user: account?.user ?? null,
+      profile: account?.profile ?? null,
       loading: false,
       signIn,
       signOut,
-      isStaff: loggedIn,
-      isAdmin: loggedIn,
+      isStaff: account?.profile.role === 'admin' || account?.profile.role === 'rh',
+      isAdmin: account?.profile.role === 'admin',
+      isRh: account?.profile.role === 'rh',
     }),
-    [loggedIn, signIn, signOut],
+    [account, signIn, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

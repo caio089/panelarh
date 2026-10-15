@@ -1,4 +1,4 @@
-export type UserRole = 'candidate' | 'admin' | 'lider'
+export type UserRole = 'candidate' | 'admin' | 'lider' | 'rh'
 
 export type CandidateStatus =
   | 'pendente'

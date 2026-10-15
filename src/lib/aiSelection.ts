@@ -1,4 +1,5 @@
 import type { Candidato, Profile, Vaga } from '@/types'
+import { rowsFromCandidatoInfo } from '@/lib/candidatoInfo'
 
 /** Score de match cruzando perfil do candidato com requisitos da vaga */
 export function scoreCandidateForVaga(
@@ -31,43 +32,27 @@ export function scoreCandidateForVaga(
     reasons.push('Múltiplas experiências relevantes')
   }
 
-  const d = Number(profile?.disc_d || 0)
-  const i = Number(profile?.disc_i || 0)
-  const s = Number(profile?.disc_s || 0)
-  const c = Number(profile?.disc_c || 0)
+  const answer = (label: string) =>
+    rowsFromCandidatoInfo(candidato.info_complementar).find(
+      ([name]) => name.toLowerCase() === label.toLowerCase(),
+    )?.[1] || ''
 
-  if (titulo.includes('gerente') || titulo.includes('líder')) {
-    if (d >= 60) {
-      score += 10
-      reasons.push('DISC com alta Dominância (liderança)')
-    }
-    if (c >= 60) {
-      score += 6
-      reasons.push('Alta Conformidade para processos')
-    }
-  } else if (titulo.includes('garçom') || titulo.includes('atendente') || titulo.includes('caixa')) {
-    if (i >= 60) {
-      score += 10
-      reasons.push('DISC com alta Influência (atendimento)')
-    }
-    if (s >= 55) {
-      score += 5
-      reasons.push('Estabilidade para ritmo de salão')
-    }
-  } else {
-    // cozinha / chapeiro / auxiliar
-    if (c >= 55) {
-      score += 8
-      reasons.push('Atenção a padrão e qualidade (DISC C)')
-    }
-    if (d >= 50) {
-      score += 6
-      reasons.push('Ritmo e decisão sob pressão (DISC D)')
-    }
-    if (s >= 60) {
-      score += 4
-      reasons.push('Consistência operacional (DISC S)')
-    }
+  if (/^sim\b/i.test(answer('Restaurante'))) {
+    score += 12
+    reasons.push('Já trabalhou em restaurante')
+  }
+  const start = answer('Começa')
+  if (/^hoje\b/i.test(start)) {
+    score += 8
+    reasons.push('Pode começar hoje')
+  } else if (/semana/i.test(start)) {
+    score += 5
+    reasons.push('Pode começar nesta semana')
+  }
+  const weekend = answer('Fim de semana') || answer('FDS')
+  if (/^sim\b/i.test(weekend)) {
+    score += 6
+    reasons.push('Disponível no fim de semana')
   }
 
   if (candidato.status === 'entrevista') {
@@ -123,7 +108,7 @@ export function explainSelection(input: {
   if (input.poolSize <= n) {
     summary += `Há ${input.poolSize} candidato${input.poolSize === 1 ? '' : 's'} no processo — todos avançaram neste corte.`
   } else {
-    summary += `Entre ${input.poolSize} candidatos, a IA ficou com ${n}: melhor cruzamento de cargo, DISC, experiência e o que a vaga pede.`
+    summary += `Entre ${input.poolSize} candidatos, a IA ficou com ${n}: melhor cruzamento de experiência, horário e o que a vaga pede.`
   }
 
   if (input.nextOut && n < input.poolSize) {

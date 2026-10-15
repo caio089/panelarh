@@ -1,14 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { DISC_QUESTIONS, computeDiscScores, DISC_LABELS, type DiscDimension } from '@/lib/disc'
-import { FORM_SHIFTS, YES_NO } from '@/lib/applicationForm'
+import {
+  COMMUTE_OPTIONS,
+  FORM_SHIFTS,
+  RESTAURANT_OPTIONS,
+  START_OPTIONS,
+  WEEKEND_OPTIONS,
+  clearApplyDraft,
+  formatCpf,
+  formatPhone,
+  loadApplyDraft,
+  saveApplyDraft,
+} from '@/lib/applicationForm'
 import { PublicHeader, PublicFooter } from '@/components/Layout'
 import { Alert, Button, Field, Input, Select, Textarea } from '@/components/ui'
 
-const STEPS = ['Dados', 'Disponibilidade', 'Sobre você', 'DISC'] as const
+const STEPS = ['Contato', 'Horário', 'Experiência'] as const
 
 export function PublicApplyPage() {
   const { id } = useParams()
@@ -17,32 +27,30 @@ export function PublicApplyPage() {
   const { getVaga, submitPublicApplication, store } = useData()
 
   const vaga = id ? getVaga(id) : undefined
-  const [step, setStep] = useState(0)
+  const saved = id ? loadApplyDraft(id) : null
+  const submitted = useRef(false)
+
+  const [step, setStep] = useState(saved?.step ?? 0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
-
-  const [personal, setPersonal] = useState({
-    full_name: '',
-    cpf: '',
-    phone: '',
-    city: '',
-  })
-  const [job, setJob] = useState({
-    preferred_unit: '',
-    weekend_availability: '',
-    has_transport: '',
-  })
-  const [shifts, setShifts] = useState<string[]>([])
-  const [story, setStory] = useState({
-    about_me: '',
-    relevant_experience: '',
-    why_company: '',
-  })
-  const [discAnswers, setDiscAnswers] = useState<Record<string, number>>({})
+  const [personal, setPersonal] = useState(
+    saved?.personal ?? { full_name: '', cpf: '', phone: '', city: '' },
+  )
+  const [job, setJob] = useState(
+    saved?.job ?? { preferred_unit: vaga?.unitName || '', weekend: '', commute: '' },
+  )
+  const [shifts, setShifts] = useState<string[]>(saved?.shifts ?? [])
+  const [experience, setExperience] = useState(
+    saved?.experience ?? { worked: '', detail: '', start: '' },
+  )
 
   const progress = useMemo(() => ((step + 1) / STEPS.length) * 100, [step])
-  const discScores = useMemo(() => computeDiscScores(discAnswers), [discAnswers])
+
+  useEffect(() => {
+    if (!id || submitted.current) return
+    saveApplyDraft(id, { step, personal, job, shifts, experience })
+  }, [id, step, personal, job, shifts, experience])
 
   if (!vaga || !vaga.ativa) {
     return (
@@ -65,61 +73,61 @@ export function PublicApplyPage() {
   if (isStaff) return <Navigate to={`/vagas/${vaga.id}`} replace />
 
   function toggleShift(shift: string) {
-    setShifts((prev) => (prev.includes(shift) ? prev.filter((s) => s !== shift) : [...prev, shift]))
+    setShifts((prev) => (prev.includes(shift) ? prev.filter((item) => item !== shift) : [...prev, shift]))
   }
 
   async function nextStep() {
     setError('')
     try {
       if (step === 0) {
-        if (!personal.full_name.trim() || !personal.cpf.trim() || !personal.phone.trim() || !personal.city.trim()) {
+        if (!personal.full_name.trim() || personal.cpf.length !== 11 || personal.phone.length < 10 || !personal.city.trim()) {
           throw new Error('Preencha nome, CPF, WhatsApp e bairro.')
-        }
-        if (personal.cpf.replace(/\D/g, '').length !== 11) {
-          throw new Error('CPF deve ter 11 números.')
         }
       }
       if (step === 1) {
-        if (!job.preferred_unit || !job.weekend_availability || !job.has_transport || shifts.length === 0) {
-          throw new Error('Selecione unidade, turnos, finais de semana e transporte.')
-        }
-      }
-      if (step === 2) {
-        if (!story.about_me.trim() || !story.relevant_experience.trim() || !story.why_company.trim()) {
-          throw new Error('Preencha os três campos sobre você.')
+        if (!job.preferred_unit || !job.weekend || !job.commute || shifts.length === 0) {
+          throw new Error('Escolha a unidade, os turnos, o fim de semana e como você chega.')
         }
       }
       if (step < STEPS.length - 1) {
-        setStep((s) => s + 1)
+        setStep((current) => current + 1)
         return
       }
 
-      if (DISC_QUESTIONS.some((q) => discAnswers[q.key] == null)) {
-        throw new Error('Responda todas as perguntas do DISC.')
+      if (!experience.worked || !experience.start) {
+        throw new Error('Diga se já trabalhou em restaurante e quando pode começar.')
+      }
+      if (experience.worked === 'Sim' && experience.detail.trim().length < 8) {
+        throw new Error('Conte em uma frase onde trabalhou e o que fazia.')
       }
 
-      if (!vaga) return
+      if (!vaga || !id) return
       setSaving(true)
+      const detail =
+        experience.worked === 'Sim'
+          ? experience.detail.trim()
+          : 'Ainda não trabalhou em restaurante.'
       const result = await submitPublicApplication({
         vagaId: vaga.id,
         nome: personal.full_name.trim(),
-        cpf: personal.cpf.replace(/\D/g, ''),
-        phone: personal.phone.trim(),
+        cpf: personal.cpf,
+        phone: personal.phone,
         city: personal.city.trim(),
         preferredUnit: job.preferred_unit,
         shifts: shifts.join(', '),
-        weekendAvailability: job.weekend_availability,
-        hasTransport: job.has_transport,
-        aboutMe: story.about_me.trim(),
-        experience: story.relevant_experience.trim(),
-        whyCompany: story.why_company.trim(),
-        disc: discScores,
+        weekendAvailability: job.weekend,
+        commute: job.commute,
+        workedRestaurant: experience.worked === 'Sim' ? `Sim — ${detail}` : 'Ainda não',
+        experience: detail,
+        startWhen: experience.start,
       })
       setSaving(false)
       if (result.error) {
         setError(result.error)
         return
       }
+      submitted.current = true
+      clearApplyDraft(id)
       setDone(true)
     } catch (err) {
       setSaving(false)
@@ -165,27 +173,27 @@ export function PublicApplyPage() {
           <p className="pv-eyebrow">Candidatura</p>
           <h1 className="mt-1 font-display text-2xl text-[var(--pv-navy)] sm:text-3xl">{vaga.titulo}</h1>
           <p className="mt-1 text-sm text-[var(--pv-muted)]">
-            {vaga.unitName || 'Panela Velha'} · responda as perguntas e envie ao RH
+            {vaga.unitName || 'Panela Velha'} · três passos curtos. Se sair e voltar, as respostas continuam aqui.
           </p>
 
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-[#E7E2D3]">
             <div className="h-full bg-[var(--pv-terracotta)] transition-all" style={{ width: `${progress}%` }} />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {STEPS.map((label, i) => (
+            {STEPS.map((label, index) => (
               <button
                 key={label}
                 type="button"
-                onClick={() => i < step && setStep(i)}
+                onClick={() => index < step && setStep(index)}
                 className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
-                  i === step
+                  index === step
                     ? 'bg-[var(--pv-navy)] text-[var(--pv-cream)]'
-                    : i < step
+                    : index < step
                       ? 'bg-[#E4F3E9] text-[#2F7D4F]'
                       : 'bg-[#F1EDE0] text-[#6B664F]'
                 }`}
               >
-                {i < step ? <Check size={12} /> : null}
+                {index < step ? <Check size={12} /> : null}
                 {label}
               </button>
             ))}
@@ -197,32 +205,37 @@ export function PublicApplyPage() {
                 <Field label="Nome completo *">
                   <Input
                     value={personal.full_name}
-                    onChange={(e) => setPersonal({ ...personal, full_name: e.target.value })}
+                    onChange={(event) => setPersonal({ ...personal, full_name: event.target.value })}
                     autoFocus
+                    autoComplete="name"
                   />
                 </Field>
-                <Field label="CPF *" hint="Somente números">
+                <Field label="WhatsApp *" hint="É por aqui que o RH chama">
                   <Input
-                    inputMode="numeric"
-                    maxLength={11}
-                    value={personal.cpf}
-                    onChange={(e) =>
-                      setPersonal({ ...personal, cpf: e.target.value.replace(/\D/g, '').slice(0, 11) })
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={formatPhone(personal.phone)}
+                    onChange={(event) =>
+                      setPersonal({ ...personal, phone: event.target.value.replace(/\D/g, '').slice(0, 11) })
                     }
-                    placeholder="00000000000"
-                  />
-                </Field>
-                <Field label="WhatsApp para contato *">
-                  <Input
-                    value={personal.phone}
-                    onChange={(e) => setPersonal({ ...personal, phone: e.target.value })}
                     placeholder="(86) 90000-0000"
                   />
                 </Field>
                 <Field label="Bairro onde mora *">
                   <Input
                     value={personal.city}
-                    onChange={(e) => setPersonal({ ...personal, city: e.target.value })}
+                    onChange={(event) => setPersonal({ ...personal, city: event.target.value })}
+                    placeholder="Ex.: Dirceu"
+                  />
+                </Field>
+                <Field label="CPF *" hint="Só os números, para o cadastro">
+                  <Input
+                    inputMode="numeric"
+                    value={formatCpf(personal.cpf)}
+                    onChange={(event) =>
+                      setPersonal({ ...personal, cpf: event.target.value.replace(/\D/g, '').slice(0, 11) })
+                    }
+                    placeholder="000.000.000-00"
                   />
                 </Field>
               </>
@@ -233,133 +246,62 @@ export function PublicApplyPage() {
                 <Field label="Unidade de preferência *">
                   <Select
                     value={job.preferred_unit}
-                    onChange={(e) => setJob({ ...job, preferred_unit: e.target.value })}
+                    onChange={(event) => setJob({ ...job, preferred_unit: event.target.value })}
                   >
                     <option value="">Selecione</option>
-                    {store.units.map((u) => (
-                      <option key={u.id} value={u.name}>
-                        {u.name}
+                    {store.units.map((unit) => (
+                      <option key={unit.id} value={unit.name}>
+                        {unit.name}
                       </option>
                     ))}
                   </Select>
                 </Field>
-                <div>
-                  <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
-                    Turnos que consegue trabalhar *
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {FORM_SHIFTS.map((shift) => {
-                      const on = shifts.includes(shift)
-                      return (
-                        <button
-                          key={shift}
-                          type="button"
-                          onClick={() => toggleShift(shift)}
-                          className={`rounded-xl px-3.5 py-2 text-sm font-bold transition ${
-                            on
-                              ? 'bg-[var(--pv-terracotta)] text-white'
-                              : 'bg-[#F1EDE0] text-[var(--pv-ink)] hover:bg-[#E7E2D3]'
-                          }`}
-                        >
-                          {shift}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <Field label="Disponibilidade aos finais de semana? *">
-                  <Select
-                    value={job.weekend_availability}
-                    onChange={(e) => setJob({ ...job, weekend_availability: e.target.value })}
-                  >
-                    <option value="">Selecione</option>
-                    {YES_NO.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Possui transporte? *">
-                  <Select
-                    value={job.has_transport}
-                    onChange={(e) => setJob({ ...job, has_transport: e.target.value })}
-                  >
-                    <option value="">Selecione</option>
-                    {YES_NO.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <Choices
+                  label="Turnos que consegue trabalhar *"
+                  values={shifts}
+                  options={FORM_SHIFTS}
+                  onToggle={toggleShift}
+                />
+                <Choices
+                  label="Pode trabalhar no fim de semana? *"
+                  value={job.weekend}
+                  options={WEEKEND_OPTIONS}
+                  onChange={(weekend) => setJob({ ...job, weekend })}
+                />
+                <Choices
+                  label="Como você chega no trabalho? *"
+                  value={job.commute}
+                  options={COMMUTE_OPTIONS}
+                  onChange={(commute) => setJob({ ...job, commute })}
+                />
               </>
             ) : null}
 
             {step === 2 ? (
               <>
-                <Field label="Nos conte um pouco sobre você *">
-                  <Textarea
-                    rows={4}
-                    value={story.about_me}
-                    onChange={(e) => setStory({ ...story, about_me: e.target.value })}
-                  />
-                </Field>
-                <Field label="Experiência profissional mais relevante *">
-                  <Textarea
-                    rows={4}
-                    value={story.relevant_experience}
-                    onChange={(e) => setStory({ ...story, relevant_experience: e.target.value })}
-                  />
-                </Field>
-                <Field label="Por que quer trabalhar na Panela Velha? *">
-                  <Textarea
-                    rows={4}
-                    value={story.why_company}
-                    onChange={(e) => setStory({ ...story, why_company: e.target.value })}
-                  />
-                </Field>
+                <Choices
+                  label="Já trabalhou em restaurante, lanchonete ou bar? *"
+                  value={experience.worked}
+                  options={RESTAURANT_OPTIONS}
+                  onChange={(worked) => setExperience({ ...experience, worked })}
+                />
+                {experience.worked === 'Sim' ? (
+                  <Field label="Onde foi e o que você fazia? *" hint="Uma frase basta">
+                    <Textarea
+                      rows={3}
+                      value={experience.detail}
+                      onChange={(event) => setExperience({ ...experience, detail: event.target.value })}
+                      placeholder="Ex.: Atendente no salão da casa do centro, por um ano."
+                    />
+                  </Field>
+                ) : null}
+                <Choices
+                  label="Quando pode começar? *"
+                  value={experience.start}
+                  options={START_OPTIONS}
+                  onChange={(start) => setExperience({ ...experience, start })}
+                />
               </>
-            ) : null}
-
-            {step === 3 ? (
-              <div className="space-y-5">
-                <p className="text-sm text-[#6B664F]">
-                  Avalie de 1 (discordo totalmente) a 5 (concordo totalmente).
-                </p>
-                {DISC_QUESTIONS.map((q) => (
-                  <div key={q.key} className="rounded-xl border border-[var(--pv-line)] bg-white p-4">
-                    <p className="text-sm font-semibold text-[var(--pv-ink)]">{q.text}</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => setDiscAnswers({ ...discAnswers, [q.key]: n })}
-                          className={`h-10 w-10 rounded-xl text-sm font-bold transition ${
-                            discAnswers[q.key] === n
-                              ? 'bg-[var(--pv-terracotta)] text-white'
-                              : 'bg-[#F1EDE0] text-[var(--pv-ink)] hover:bg-[#E7E2D3]'
-                          }`}
-                        >
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {(Object.keys(DISC_LABELS) as DiscDimension[]).map((d) => (
-                    <div
-                      key={d}
-                      className="rounded-xl bg-[var(--pv-navy)] px-3 py-3 text-center text-[var(--pv-cream)]"
-                    >
-                      <div className="text-xs opacity-80">{DISC_LABELS[d]}</div>
-                      <div className="font-display text-2xl">{discScores[d]}%</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             ) : null}
           </div>
 
@@ -375,7 +317,7 @@ export function PublicApplyPage() {
               disabled={step === 0 || saving}
               onClick={() => {
                 setError('')
-                setStep((s) => Math.max(0, s - 1))
+                setStep((current) => Math.max(0, current - 1))
               }}
             >
               Voltar
@@ -387,6 +329,48 @@ export function PublicApplyPage() {
         </div>
       </div>
       <PublicFooter />
+    </div>
+  )
+}
+
+function Choices({
+  label,
+  options,
+  value,
+  values,
+  onChange,
+  onToggle,
+}: {
+  label: string
+  options: readonly string[]
+  value?: string
+  values?: string[]
+  onChange?: (next: string) => void
+  onToggle?: (next: string) => void
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const selected = values ? values.includes(option) : value === option
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => (onToggle ? onToggle(option) : onChange?.(option))}
+              className={`rounded-xl px-3.5 py-2 text-sm font-bold transition ${
+                selected
+                  ? 'bg-[var(--pv-terracotta)] text-white'
+                  : 'bg-[#F1EDE0] text-[var(--pv-ink)] hover:bg-[#E7E2D3]'
+              }`}
+            >
+              {option}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

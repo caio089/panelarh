@@ -23,11 +23,11 @@ import { PageHeader, StatusPill } from '@/components/ui'
 import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
 
 export function AdminDashboardPage() {
-  const { isAdmin, profile } = useAuth()
+  const { isAdmin, isRh, profile } = useAuth()
   const { store } = useData()
   const [detail, setDetail] = useState<CandidateDetailData | null>(null)
 
-  const unitIds = isAdmin
+  const unitIds = isAdmin || isRh
     ? store.units.map((u) => u.id)
     : [profile?.unit_id || store.units[0]?.id].filter(Boolean)
 
@@ -137,8 +137,8 @@ export function AdminDashboardPage() {
               </span>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-[#EFE3C4]">
-              A IA lê o que a vaga pede, cruza DISC, experiências e disponibilidade — e ranqueia
-              os melhores candidatos para você afinar a seleção.
+              A IA lê o que a vaga pede, cruza experiência, turno e quando a pessoa pode começar —
+              e ranqueia os melhores candidatos para você afinar a seleção.
             </p>
           </div>
         </div>
@@ -146,7 +146,7 @@ export function AdminDashboardPage() {
           <AiChip icon={<Gauge size={15} />} label="Match médio" value={`${avgMatch}%`} />
           <AiChip icon={<Target size={15} />} label="High-fit (≥75%)" value={String(highFit)} />
           <AiChip icon={<Zap size={15} />} label="Taxa entrevista+" value={`${interviewRate}%`} />
-          <AiChip icon={<Bot size={15} />} label="Prontos p/ seleção" value={String(candidatos.filter((c) => c.status !== 'reprovada').length)} />
+          <AiChip icon={<Bot size={15} />} label="Prontos p/ seleção" value={String(candidatos.filter((c) => c.status !== 'reprovada' && c.status !== 'banco').length)} />
         </div>
       </section>
 

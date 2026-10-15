@@ -16,7 +16,6 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { ArrowLeft, MessageCircle, Trash2, X, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { DISC_LABELS } from '@/lib/disc'
 import { formatDateBR } from '@/lib/utils'
 import { openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
@@ -102,6 +101,7 @@ export function AdminVagaPage() {
     }
     const cand = cands.find((c) => c.id === candId)
     if (!cand || !nextStatus || cand.status === nextStatus) return
+    if (nextStatus === 'reprovada') nextStatus = 'banco'
     if (nextStatus === 'aprovada') {
       setPendingStatus({ id: candId, status: nextStatus })
       setTrainingDate('')
@@ -216,35 +216,6 @@ export function AdminVagaPage() {
                 <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
               </section>
             ) : null}
-
-            <section>
-              <h3 className="mb-2 font-bold text-[var(--pv-navy)]">DISC</h3>
-              {selected.profile?.disc_d != null ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {(['D', 'I', 'S', 'C'] as const).map((d) => {
-                    const val =
-                      d === 'D'
-                        ? selected.profile?.disc_d
-                        : d === 'I'
-                          ? selected.profile?.disc_i
-                          : d === 'S'
-                            ? selected.profile?.disc_s
-                            : selected.profile?.disc_c
-                    return (
-                      <div key={d} className="rounded-xl bg-[var(--pv-navy)] px-3 py-3 text-[var(--pv-cream)]">
-                        <div className="text-[11px] opacity-80">{DISC_LABELS[d]}</div>
-                        <div className="font-display text-2xl">{Number(val || 0)}%</div>
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
-                          <div className="h-full bg-[var(--pv-terracotta)]" style={{ width: `${Number(val || 0)}%` }} />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="italic text-[#A9A493]">Sem DISC</p>
-              )}
-            </section>
 
             <Button
               className="w-full"
@@ -383,7 +354,11 @@ function KanbanColumn({
             <SortableCand key={cand.id} cand={cand} onOpen={() => onOpen(cand)} onDelete={() => onDelete(cand)} />
           ))}
         </SortableContext>
-        {items.length === 0 ? <p className="py-6 text-center text-[12px] italic text-[#A9A493]">Arraste aqui</p> : null}
+        {items.length === 0 ? (
+          <p className="py-6 text-center text-[12px] italic text-[#A9A493]">
+            {status === 'reprovada' ? 'Solte aqui para ir ao banco de talentos' : 'Arraste aqui'}
+          </p>
+        ) : null}
       </div>
     </section>
   )

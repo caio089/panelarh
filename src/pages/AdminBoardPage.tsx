@@ -10,7 +10,7 @@ import { Button, Field, Input, Modal, PageHeader, Select, StatusPill, Textarea, 
 import { EmptyState } from '@/components/Layout'
 
 export function AdminBoardPage() {
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isRh } = useAuth()
   const { store, addVaga } = useData()
   const [openForm, setOpenForm] = useState(false)
   const [formError, setFormError] = useState('')
@@ -24,10 +24,10 @@ export function AdminBoardPage() {
   })
 
   const visibleUnits = useMemo(() => {
-    if (isAdmin) return store.units
+    if (isAdmin || isRh) return store.units
     const id = profile?.unit_id || store.units[0]?.id
     return store.units.filter((u) => u.id === id)
-  }, [store.units, profile, isAdmin])
+  }, [store.units, profile, isAdmin, isRh])
 
   function fillWithAi() {
     if (!form.titulo.trim() || aiLoading) return

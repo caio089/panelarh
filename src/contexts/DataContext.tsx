@@ -51,11 +51,10 @@ interface PublicApplicationInput {
   preferredUnit: string
   shifts: string
   weekendAvailability: string
-  hasTransport: string
-  aboutMe: string
+  commute: string
+  workedRestaurant: string
   experience: string
-  whyCompany: string
-  disc: { D: number; I: number; S: number; C: number }
+  startWhen: string
 }
 
 interface DataContextValue {
@@ -96,11 +95,10 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
     `Bairro: ${input.city}`,
     `Unidade: ${input.preferredUnit}`,
     `Turnos: ${input.shifts}`,
-    `FDS: ${input.weekendAvailability}`,
-    `Transporte: ${input.hasTransport}`,
-    `Sobre: ${input.aboutMe}`,
-    `Motivação: ${input.whyCompany}`,
-    `DISC D${input.disc.D} I${input.disc.I} S${input.disc.S} C${input.disc.C}`,
+    `Fim de semana: ${input.weekendAvailability}`,
+    `Como chega: ${input.commute}`,
+    `Restaurante: ${input.workedRestaurant}`,
+    `Começa: ${input.startWhen}`,
   ].join('\n')
 }
 
@@ -170,11 +168,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const updateCandidatoStatus = useCallback(
     (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => {
+      const nextStatus: CandidateStatus = status === 'reprovada' ? 'banco' : status
       setStore((prev) => ({
         ...prev,
         candidatos: prev.candidatos.map((c) =>
           c.id === candidatoId
-            ? { ...c, status, data_inicio_treinamento: status === 'aprovada' ? dataInicio || null : null }
+            ? {
+                ...c,
+                status: nextStatus,
+                data_inicio_treinamento: nextStatus === 'aprovada' ? dataInicio || null : null,
+              }
             : c,
         ),
       }))

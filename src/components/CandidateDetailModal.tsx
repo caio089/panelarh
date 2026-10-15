@@ -1,7 +1,6 @@
 import { MessageCircle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { DISC_LABELS } from '@/lib/disc'
 import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { formatDateBR } from '@/lib/utils'
@@ -47,7 +46,6 @@ export function CandidateDetailModal({
     DEFAULT_WHATSAPP_MSG
   const phone = phoneFromCandidatoInfo(candidato.info_complementar, profile?.phone)
   const hasPhone = Boolean(phone)
-  const hasDisc = profile?.disc_d != null
 
   return (
     <Modal open={open} title={candidato.nome} onClose={onClose} wide>
@@ -100,32 +98,6 @@ export function CandidateDetailModal({
                 {exp.description ? <p className="mt-1 text-[#4A4636]">{exp.description}</p> : null}
               </div>
             ))}
-          </div>
-        </section>
-      ) : null}
-
-      {hasDisc ? (
-        <section className="mt-4">
-          <h4 className="mb-2 text-[11px] font-bold uppercase tracking-[1px] text-[var(--pv-terracotta)]">
-            DISC
-          </h4>
-          <div className="grid grid-cols-2 gap-2">
-            {(['D', 'I', 'S', 'C'] as const).map((d) => {
-              const val =
-                d === 'D'
-                  ? profile?.disc_d
-                  : d === 'I'
-                    ? profile?.disc_i
-                    : d === 'S'
-                      ? profile?.disc_s
-                      : profile?.disc_c
-              return (
-                <div key={d} className="rounded-xl bg-[var(--pv-navy)] px-3 py-3 text-[var(--pv-cream)]">
-                  <div className="text-[11px] opacity-80">{DISC_LABELS[d]}</div>
-                  <div className="font-display text-xl">{Number(val || 0)}%</div>
-                </div>
-              )
-            })}
           </div>
         </section>
       ) : null}
