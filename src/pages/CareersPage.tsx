@@ -23,7 +23,7 @@ export function CareersPage() {
             <img
               src="/logo-panela-velha.png"
               alt="Panela Velha"
-              className="mb-6 h-16 w-auto object-contain drop-shadow-md sm:h-[72px]"
+              className="mb-6 h-20 w-auto object-contain sm:h-24"
             />
             <p className="pv-eyebrow">Carreiras</p>
             <h1 className="mt-3 font-display text-[2.5rem] leading-[1.08] text-[#F7F4EC] sm:text-5xl lg:text-[58px]">

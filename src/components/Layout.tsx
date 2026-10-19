@@ -5,30 +5,13 @@ import { Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
 
-export function BrandMark({ compact = false, light = false }: { compact?: boolean; light?: boolean }) {
+export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="flex items-center gap-3">
-      <img
-        src="/logo-panela-velha.png"
-        alt="Panela Velha"
-        className={cn('object-contain drop-shadow-sm', compact ? 'h-9 w-auto' : 'h-12 w-auto sm:h-14')}
-      />
-      {!compact && (
-        <div className="hidden min-[400px]:block">
-          <div
-            className={cn(
-              'font-display text-[15px] leading-none tracking-tight sm:text-base',
-              light ? 'text-[var(--pv-navy)]' : 'text-[#F7F4EC]',
-            )}
-          >
-            Panela Velha
-          </div>
-          <div className="mt-1 text-[10.5px] font-bold uppercase tracking-[1.5px] text-[var(--pv-terracotta)]">
-            Recrutamento
-          </div>
-        </div>
-      )}
-    </div>
+    <img
+      src="/logo-panela-velha.png"
+      alt="Panela Velha"
+      className={cn('w-auto object-contain', compact ? 'h-10' : 'h-14 sm:h-16')}
+    />
   )
 }
 

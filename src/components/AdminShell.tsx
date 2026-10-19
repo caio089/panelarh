@@ -39,6 +39,7 @@ const STATIC_GROUPS: NavGroup[] = [
     title: 'Gestão',
     items: [
       { to: '/admin', end: true, label: 'Visão geral', icon: LayoutDashboard },
+      { to: '/admin/selecao', label: 'IA', icon: Sparkles },
       { to: '/admin/gerentes', label: 'Gerentes', icon: UserCog },
     ],
   },
