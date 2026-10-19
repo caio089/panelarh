@@ -13,6 +13,7 @@ import {
   endDemoSession,
   findDemoAccount,
   startDemoSession,
+  syncStaffCookie,
   type DemoUser,
 } from '@/lib/demo/auth'
 
@@ -30,7 +31,11 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [sessionId, setSessionId] = useState(() => currentDemoSessionId())
+  const [sessionId, setSessionId] = useState(() => {
+    const id = currentDemoSessionId()
+    syncStaffCookie(id)
+    return id
+  })
   const account = demoAccountById(sessionId)
 
   const signIn = useCallback(async (email: string, password: string) => {

@@ -14,9 +14,8 @@ export function AdminLoginPage() {
 
   useEffect(() => {
     if (loading || !user) return
-    if (isStaff) {
-      navigate(isRh ? '/admin/rh' : '/admin', { replace: true })
-    }
+    if (!isStaff) return
+    navigate(isRh ? '/admin/rh' : '/admin', { replace: true })
   }, [loading, user, isStaff, isRh, navigate])
 
   async function onSubmit(e: FormEvent) {

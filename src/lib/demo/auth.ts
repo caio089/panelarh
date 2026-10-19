@@ -7,6 +7,7 @@ export const DEMO_RH_EMAIL = 'rh@panelavelha.com'
 export const DEMO_RH_PASSWORD = 'rh123'
 
 const SESSION_KEY = 'panela-demo-session'
+const STAFF_COOKIE = 'panela-staff'
 
 export interface DemoUser {
   id: string
@@ -71,10 +72,26 @@ export function currentDemoSessionId() {
   return demoAccountById(id) ? id : null
 }
 
+function writeStaffCookie(userId: string | null) {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  if (!userId) {
+    document.cookie = `${STAFF_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`
+    return
+  }
+  document.cookie = `${STAFF_COOKIE}=${encodeURIComponent(userId)}; Path=/; SameSite=Lax${secure}`
+}
+
 export function startDemoSession(userId: string) {
   window.localStorage.setItem(SESSION_KEY, userId)
+  writeStaffCookie(userId)
 }
 
 export function endDemoSession() {
   window.localStorage.removeItem(SESSION_KEY)
+  writeStaffCookie(null)
+}
+
+/** Garante o cookie da sessão já gravada, antes de qualquer consulta interna. */
+export function syncStaffCookie(userId: string | null) {
+  writeStaffCookie(userId)
 }

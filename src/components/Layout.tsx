@@ -33,7 +33,7 @@ export function BrandMark({ compact = false, light = false }: { compact?: boolea
 }
 
 export function PublicHeader() {
-  const { isStaff, signOut } = useAuth()
+  const { isStaff, isRh, signOut } = useAuth()
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0E1730]/78 backdrop-blur-xl">
@@ -59,7 +59,7 @@ export function PublicHeader() {
           {isStaff ? (
             <>
               <NavLink
-                to="/admin"
+                to={isRh ? '/admin/rh' : '/admin'}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(239,227,196,0.3)] px-3 py-2 text-[12.5px] font-semibold text-[var(--pv-cream)] transition hover:bg-white/5"
               >
                 <LayoutDashboard size={14} />

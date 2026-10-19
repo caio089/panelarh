@@ -1,6 +1,7 @@
-export type DirceuCategory = 'faturamento' | 'itens' | 'entregas' | 'financeiro'
+export type DirceuCategory = 'cozinha' | 'faturamento' | 'itens' | 'entregas' | 'financeiro'
 
 export const DIRCEU_CATEGORIES: { id: DirceuCategory; label: string; hint: string }[] = [
+  { id: 'cozinha', label: 'Cozinha', hint: 'Pedidos agora e tempo de cada etapa' },
   { id: 'faturamento', label: 'Faturamento', hint: 'Pedidos, canais e pagamentos' },
   { id: 'itens', label: 'Itens vendidos', hint: 'Produtos e complementos' },
   { id: 'entregas', label: 'Entregas', hint: 'Taxas, parceiros e pedidos' },
@@ -106,7 +107,31 @@ export interface FinanceiroReport {
   entries: FinanceEntry[]
 }
 
-export type DirceuReport = FaturamentoReport | ItensReport | EntregasReport | FinanceiroReport
+export interface KitchenStage {
+  label: string
+  count: number
+  averageMinutes: number | null
+  medianMinutes: number | null
+}
+
+export interface KitchenStatus {
+  label: string
+  count: number
+}
+
+export interface CozinhaReport {
+  total: number
+  preparing: number
+  waiting: number
+  onTheWay: number
+  finished: number
+  canceled: number
+  active: number
+  current: KitchenStatus[]
+  stages: KitchenStage[]
+}
+
+export type DirceuReport = FaturamentoReport | ItensReport | EntregasReport | FinanceiroReport | CozinhaReport
 
 export interface DirceuPayload {
   unit: string

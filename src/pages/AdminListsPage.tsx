@@ -1,5 +1,5 @@
 import { useMemo, useState, type MouseEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
@@ -503,6 +503,14 @@ function VagaFormModal({
   )
 }
 
+const STATUS_FILTERS: CandidateStatus[] = ['pendente', 'entrevista', 'aprovada', 'banco']
+
+function statusFromQuery(value: string | null): 'all' | CandidateStatus {
+  if (value === 'reprovada' || value === 'banco') return 'banco'
+  if (value === 'pendente' || value === 'entrevista' || value === 'aprovada') return value
+  return 'all'
+}
+
 export function AdminCandidatesPage() {
   const { isAdmin, isRh, profile } = useAuth()
   const { store } = useData()
@@ -519,11 +527,24 @@ export function AdminCandidatesPage() {
 
   const vagaIds = useMemo(() => new Set(scopedVagas.map((v) => v.id)), [scopedVagas])
 
+  const [params, setParams] = useSearchParams()
+  const statusFilter = statusFromQuery(params.get('status'))
   const [q, setQ] = useState('')
   const [unitFilter, setUnitFilter] = useState('all')
   const [vagaFilter, setVagaFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
   const [detail, setDetail] = useState<CandidateDetailData | null>(null)
+
+  function setStatusFilter(next: string) {
+    setParams(
+      (prev) => {
+        const updated = new URLSearchParams(prev)
+        if (next === 'all') updated.delete('status')
+        else updated.set('status', next === 'reprovada' ? 'banco' : next)
+        return updated
+      },
+      { replace: true },
+    )
+  }
 
   const vagasForUnit =
     unitFilter === 'all' ? scopedVagas : scopedVagas.filter((v) => v.unit_id === unitFilter)
@@ -558,8 +579,12 @@ export function AdminCandidatesPage() {
     <div className="px-5 py-6 sm:px-8">
       <PageHeader
         eyebrow="Base"
-        title="Candidatos"
-        description={`${candidatos.length} resultado${candidatos.length === 1 ? '' : 's'} com os filtros atuais`}
+        title={statusFilter === 'banco' ? 'Banco de talentos' : 'Candidatos'}
+        description={
+          statusFilter === 'banco'
+            ? 'Pessoas que não foram escolhidas. O cadastro fica aqui para a próxima vaga.'
+            : `${candidatos.length} resultado${candidatos.length === 1 ? '' : 's'} com os filtros atuais`
+        }
       />
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -597,7 +622,7 @@ export function AdminCandidatesPage() {
         <Field label="Status" labelClassName="text-[var(--pv-cream)]/75">
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="all">Todos</option>
-            {(Object.keys(STATUS_META) as CandidateStatus[]).map((s) => (
+            {STATUS_FILTERS.map((s) => (
               <option key={s} value={s}>
                 {STATUS_META[s].label}
               </option>
@@ -660,7 +685,9 @@ export function AdminCandidatesPage() {
               {candidatos.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-5 py-12 text-center text-[#A9A493]">
-                    Nenhum candidato com esses filtros
+                    {statusFilter === 'banco'
+                      ? 'Ninguém no banco de talentos ainda'
+                      : 'Nenhum candidato com esses filtros'}
                   </td>
                 </tr>
               ) : null}

@@ -53,7 +53,7 @@ export function DirceuOverview({ paramPrefix = '' }: { paramPrefix?: string }) {
       </header>
 
       <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-6">
-        <nav className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" aria-label="Relatórios da Saipos">
+        <nav className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="Relatórios da Saipos">
           {DIRCEU_CATEGORIES.map((item) => {
             const selected = category === item.id
             return (
@@ -80,7 +80,7 @@ export function DirceuOverview({ paramPrefix = '' }: { paramPrefix?: string }) {
 
         {!category ? (
           <p className="rounded-2xl border border-dashed border-[var(--pv-line)] px-4 py-8 text-center text-sm text-[var(--pv-ink)]/65">
-            Faturamento, itens, entregas ou financeiro. O clique carrega só o período selecionado.
+            Cozinha, faturamento, itens, entregas ou financeiro. O clique carrega só o período selecionado.
           </p>
         ) : null}
         {category && loading && !report ? <ReportSkeleton /> : null}
@@ -93,7 +93,12 @@ export function DirceuOverview({ paramPrefix = '' }: { paramPrefix?: string }) {
           </div>
         ) : null}
         {report ? <DirceuReportView payload={report} /> : null}
-        {report?.partial ? (
+        {period === 'dia' && category ? (
+          <p className="text-sm text-[var(--pv-ink)]/65" aria-live="polite">
+            {loading && report ? 'Atualizando os números.' : 'Este dia atualiza sozinho a cada 10 minutos.'}
+            {report?.partial ? ' Os números ainda estão entrando.' : ''}
+          </p>
+        ) : report?.partial ? (
           <p className="text-sm text-[var(--pv-ink)]/65" aria-live="polite">
             Os números ainda estão entrando.
           </p>

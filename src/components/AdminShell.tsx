@@ -1,10 +1,11 @@
-import { NavLink, Outlet, Navigate, Link, useLocation } from 'react-router-dom'
+import { Outlet, Navigate, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Building2,
   Briefcase,
   KanbanSquare,
   Users,
+  Archive,
   Sparkles,
   LogOut,
   ExternalLink,
@@ -14,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { isRhArea } from '@/lib/access'
 import { useData } from '@/contexts/DataContext'
 import { BrandMark, LoadingScreen } from '@/components/Layout'
 import { Button } from '@/components/ui'
@@ -58,20 +60,11 @@ const RH_GROUPS: NavGroup[] = [
       { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
       { to: '/admin/quadro', label: 'Pipeline', icon: KanbanSquare },
       { to: '/admin/candidatos', label: 'Candidatos', icon: Users },
+      { to: '/admin/candidatos?status=banco', label: 'Banco de talentos', icon: Archive },
       { to: '/admin/selecao', label: 'Seleção', icon: Sparkles },
     ],
   },
 ]
-
-function isOwnerPath(pathname: string) {
-  return (
-    pathname === '/admin' ||
-    pathname.startsWith('/admin/ponto') ||
-    pathname.startsWith('/admin/gerentes') ||
-    pathname.startsWith('/admin/unidades') ||
-    pathname.startsWith('/admin/unidade/')
-  )
-}
 
 export function AdminShell() {
   const { loading, isStaff, isAdmin, isRh, signOut } = useAuth()
@@ -80,7 +73,8 @@ export function AdminShell() {
 
   if (loading) return <LoadingScreen text="Abrindo painel…" />
   if (!isStaff) return <Navigate to="/admin/login" replace />
-  if (isRh && isOwnerPath(pathname)) return <Navigate to="/admin/rh" replace />
+  if (isRh && !isRhArea(pathname)) return <Navigate to="/admin/rh" replace />
+  if (!isAdmin && !isRh) return <Navigate to="/" replace />
 
   const unitGroup: NavGroup = {
     title: 'Unidades',
@@ -163,22 +157,29 @@ export function AdminShell() {
 
 function SideLink({ item }: { item: NavItem }) {
   const Icon = item.icon
+  const { pathname, search } = useLocation()
+  const talentView = search.includes('status=banco')
+  const itemIsTalent = item.to.includes('status=banco')
+  const onCandidates = pathname === '/admin/candidatos'
+  const active = onCandidates
+    ? itemIsTalent
+      ? talentView
+      : item.to === '/admin/candidatos' && !talentView
+    : pathname === item.to || (!item.end && item.to.startsWith('/') && !item.to.includes('?') && pathname.startsWith(`${item.to}/`))
   return (
-    <NavLink
+    <Link
       to={item.to}
-      end={item.end}
-      className={({ isActive }) =>
-        cn(
-          'flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold whitespace-nowrap transition lg:mb-0.5',
-          isActive
-            ? 'bg-[var(--pv-terracotta)] text-white shadow-[0_8px_18px_rgba(225,91,63,0.28)]'
-            : 'text-[#EFE3C4] hover:bg-white/10 hover:text-white',
-        )
-      }
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold whitespace-nowrap transition lg:mb-0.5',
+        active
+          ? 'bg-[var(--pv-terracotta)] text-white shadow-[0_8px_18px_rgba(225,91,63,0.28)]'
+          : 'text-[#EFE3C4] hover:bg-white/10 hover:text-white',
+      )}
     >
       <Icon size={16} />
       {item.label}
-    </NavLink>
+    </Link>
   )
 }
 

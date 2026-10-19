@@ -17,7 +17,7 @@ export function AdminUnitsPage() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  if (!isAdmin) return <Navigate to="/admin" replace />
+  if (!isAdmin) return <Navigate to="/admin/rh" replace />
 
   function openCreate() {
     setError('')

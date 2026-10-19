@@ -156,14 +156,14 @@ async function saiposGet(path, params, token, signal) {
   })
 }
 
-async function* saiposPages(path, params, token, signal, maxPages = MAX_PAGES) {
+async function* saiposPages(path, params, token, signal, maxPages = MAX_PAGES, pageSize = PAGE_SIZE) {
   for (let page = 0; page < maxPages; page += 1) {
     const batch = asRows(
-      await saiposGet(path, { ...params, p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE }, token, signal),
+      await saiposGet(path, { ...params, p_limit: pageSize, p_offset: page * pageSize }, token, signal),
     )
-    const last = batch.length < PAGE_SIZE || page === maxPages - 1
+    const last = batch.length < pageSize || page === maxPages - 1
     yield { batch, last }
-    if (batch.length < PAGE_SIZE) return
+    if (batch.length < pageSize) return
   }
 }
 
@@ -564,23 +564,93 @@ function rememberRaw(key, rows) {
   }
 }
 
+const KITCHEN_STAGES = ['Cozinha', 'Aguardando Entrega', 'Saiu para entrega', 'Entregue', 'Finalizado', 'Cancelados']
+
+/** Último status e duração de cada etapa. Sem nome, telefone ou pedido identificável. */
+function summarizeKitchen(rows) {
+  const current = new Map()
+  const stages = new Map()
+
+  for (const row of rows) {
+    const steps = (Array.isArray(row.histories) ? row.histories : [])
+      .slice()
+      .sort((a, b) => num(a.order) - num(b.order))
+    const lastName = text(steps[steps.length - 1]?.desc_store_sale_status) || 'Sem status'
+    const status = current.get(lastName) || { label: lastName, count: 0 }
+    status.count += 1
+    current.set(lastName, status)
+
+    for (const step of steps) {
+      const name = text(step.desc_store_sale_status) || 'Sem status'
+      const stage = stages.get(name) || { label: name, count: 0, seconds: [] }
+      stage.count += 1
+      const seconds = Number(step.duration_time_seconds)
+      if (Number.isFinite(seconds) && seconds >= 0) stage.seconds.push(seconds)
+      stages.set(name, stage)
+    }
+  }
+
+  const countOf = (label) => current.get(label)?.count || 0
+  const ordered = (map, mapItem) => [
+    ...KITCHEN_STAGES.filter((label) => map.has(label)).map((label) => mapItem(map.get(label))),
+    ...[...map.values()].filter((item) => !KITCHEN_STAGES.includes(item.label)).map(mapItem),
+  ]
+  const minutes = (seconds) => {
+    const timed = seconds.filter((value) => value > 0)
+    if (timed.length === 0) return { averageMinutes: null, medianMinutes: null }
+    const sorted = timed.slice().sort((a, b) => a - b)
+    const mean = timed.reduce((sum, value) => sum + value, 0) / timed.length
+    return {
+      averageMinutes: Math.round((mean / 60) * 10) / 10,
+      medianMinutes: Math.round((sorted[Math.floor(sorted.length / 2)] / 60) * 10) / 10,
+    }
+  }
+
+  const preparing = countOf('Cozinha')
+  const waiting = countOf('Aguardando Entrega')
+  const onTheWay = countOf('Saiu para entrega')
+  return {
+    total: rows.length,
+    preparing,
+    waiting,
+    onTheWay,
+    finished: countOf('Finalizado') + countOf('Entregue'),
+    canceled: countOf('Cancelados'),
+    active: preparing + waiting + onTheWay,
+    current: ordered(current, (item) => ({ label: item.label, count: item.count })),
+    stages: ordered(stages, (item) => ({
+      label: item.label,
+      count: item.count,
+      ...minutes(item.seconds),
+    })),
+  }
+}
+
 const CATEGORIES = {
+  cozinha: {
+    path: '/sales_status_histories',
+    filter: 'shift_date',
+    pageSize: 20,
+    maxPages: 30,
+    summarize: (rows) => summarizeKitchen(rows),
+  },
   faturamento: { path: '/search_sales', filter: 'shift_date', summarize: (rows) => summarizeSales(rows) },
   itens: { path: '/sales_items', filter: 'shift_date', summarize: (rows) => summarizeItems(rows) },
   entregas: { path: '/search_sales', filter: 'shift_date', summarize: (rows) => summarizeDeliveries(rows) },
   financeiro: { path: '/search_financial_transactions', filter: 'date', summarize: (rows) => summarizeFinance(rows) },
 }
 
-async function loadOneDay(spec, day, token, signal) {
+async function loadOneDay(spec, day, token, signal, fresh = false) {
   const key = `${spec.path}:${spec.filter}:${day}`
-  if (rawCache.has(key)) return rawCache.get(key)
+  if (!fresh && rawCache.has(key)) return rawCache.get(key)
   const rows = []
   for await (const page of saiposPages(
     spec.path,
     { p_date_column_filter: spec.filter, ...dayRange(day, day) },
     token,
     signal,
-    2,
+    spec.maxPages || 2,
+    spec.pageSize || PAGE_SIZE,
   )) {
     rows.push(...page.batch)
     if (page.last) break
@@ -589,7 +659,7 @@ async function loadOneDay(spec, day, token, signal) {
   return rows
 }
 
-async function* loadRangeSteps(spec, start, end, token, signal) {
+async function* loadRangeSteps(spec, start, end, token, signal, fresh = false) {
   const days = eachDay(start, end)
   const collected = new Map()
   const queue = []
@@ -600,7 +670,7 @@ async function* loadRangeSteps(spec, start, end, token, signal) {
   }
 
   for (const [index, day] of days.entries()) {
-    void loadOneDay(spec, day, token, signal).then(
+    void loadOneDay(spec, day, token, signal, fresh).then(
       (rows) => {
         queue.push({ index, rows })
         wake()
@@ -635,11 +705,11 @@ async function* loadRangeSteps(spec, start, end, token, signal) {
   }
 }
 
-async function* streamDirceuReport(day, period, category, token, signal) {
+async function* streamDirceuReport(day, period, category, token, signal, fresh = false) {
   const spec = CATEGORIES[category]
   const bounds = periodBounds(day, period, todayInFortaleza())
   const key = `${bounds.start}:${bounds.end}:${category}`
-  const cached = dayCache.get(key)
+  const cached = fresh ? null : dayCache.get(key)
   if (cached) {
     yield { status: 200, body: { ...cached, partial: false } }
     return
@@ -647,7 +717,7 @@ async function* streamDirceuReport(day, period, category, token, signal) {
 
   let latest = null
   try {
-    for await (const step of loadRangeSteps(spec, bounds.start, bounds.end, token, signal)) {
+    for await (const step of loadRangeSteps(spec, bounds.start, bounds.end, token, signal, fresh)) {
       latest = reportBody(day, period, bounds, category, step.rows, spec.summarize, step.partial)
       yield { status: 200, body: latest }
       if (!step.partial && !signal?.aborted) dayCache.set(key, latest)
@@ -664,7 +734,7 @@ async function* streamDirceuReport(day, period, category, token, signal) {
 }
 
 /** Entrega cada página assim que a Saipos responde, sem esperar o período inteiro. */
-export async function pipeDirceuReport(date, category, token, signal, period = 'dia', response) {
+export async function pipeDirceuReport(date, category, token, signal, period = 'dia', response, fresh = false) {
   const day = date || todayInFortaleza()
   const span = period === 'semana' || period === 'mes' ? period : 'dia'
   if (!isIsoDate(day)) {
@@ -676,7 +746,7 @@ export async function pipeDirceuReport(date, category, token, signal, period = '
   if (!CATEGORIES[category]) {
     response.statusCode = 400
     response.setHeader('Content-Type', 'application/json; charset=utf-8')
-    response.end(JSON.stringify({ error: 'Escolha faturamento, itens, entregas ou financeiro.' }))
+    response.end(JSON.stringify({ error: 'Escolha cozinha, faturamento, itens, entregas ou financeiro.' }))
     return
   }
   if (!normalizeToken(token)) {
@@ -688,7 +758,7 @@ export async function pipeDirceuReport(date, category, token, signal, period = '
 
   let opened = false
   try {
-    for await (const event of streamDirceuReport(day, span, category, token, signal)) {
+    for await (const event of streamDirceuReport(day, span, category, token, signal, fresh)) {
       if (signal?.aborted || response.writableEnded) return
       if (!opened && event.status !== 200) {
         response.statusCode = event.status

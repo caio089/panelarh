@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from 'react'
+import { todayInFortaleza } from './day'
 import type {
+  CozinhaReport,
   DirceuPayload,
   EntregasReport,
   FaturamentoReport,
@@ -14,6 +16,10 @@ const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL
 const quantity = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 })
 
 export function DirceuReportView({ payload }: { payload: DirceuPayload }) {
+  if (payload.category === 'cozinha') {
+    const live = payload.period === 'dia' && payload.date === todayInFortaleza()
+    return <CozinhaView report={payload.report as CozinhaReport} live={live} />
+  }
   if (payload.category === 'faturamento') {
     return <FaturamentoView report={payload.report as FaturamentoReport} showDate={payload.period !== 'dia'} />
   }
@@ -22,6 +28,111 @@ export function DirceuReportView({ payload }: { payload: DirceuPayload }) {
     return <EntregasView report={payload.report as EntregasReport} showDate={payload.period !== 'dia'} />
   }
   return <FinanceiroView report={payload.report as FinanceiroReport} />
+}
+
+const STAGE_HINT: Record<string, string> = {
+  Cozinha: 'Preparo',
+  'Aguardando Entrega': 'Pronto, esperando saída',
+  'Saiu para entrega': 'Na rua',
+  Entregue: 'Chegou no cliente',
+  Finalizado: 'Encerrado',
+  Cancelados: 'Não seguiram',
+}
+
+function CozinhaView({ report, live }: { report: CozinhaReport; live: boolean }) {
+  const biggest = Math.max(1, ...report.current.map((item) => item.count))
+  const cards = [
+    { label: 'Na cozinha', value: report.preparing, detail: 'último status ainda é preparo', accent: true },
+    { label: 'Aguardando', value: report.waiting, detail: 'pronto para sair', accent: false },
+    { label: 'Na rua', value: report.onTheWay, detail: 'saiu para entrega', accent: false },
+    {
+      label: 'Finalizados',
+      value: report.finished,
+      detail: report.canceled > 0 ? plural(report.canceled, 'cancelado', 'cancelados') : 'encerrados no período',
+      accent: false,
+    },
+  ]
+
+  return (
+    <div className="space-y-5">
+      <div className="overflow-hidden rounded-[24px] bg-[#0A1228] text-[#F7F4EC]">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-5 pt-5">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[1.6px] text-[var(--pv-cream)]/70">
+              {live ? 'Agora no Dirceu' : 'Status do período'}
+            </p>
+            <p className="mt-1 font-display text-4xl tabular-nums">{report.active}</p>
+            <p className="text-sm text-white/70">
+              {report.active === 1 ? 'pedido ainda em movimento' : 'pedidos ainda em movimento'} · {report.total} no período
+            </p>
+          </div>
+          {live ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold">
+              <span className="h-2 w-2 rounded-full bg-[var(--pv-terracotta)]" />
+              Último status gravado
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-5 grid gap-px bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
+          {cards.map((card) => (
+            <div key={card.label} className="bg-[#0A1228] px-5 py-4">
+              <p className="text-[11px] font-bold uppercase tracking-[1.2px] text-white/55">{card.label}</p>
+              <p className={`mt-1 font-display text-3xl tabular-nums ${card.accent ? 'text-[var(--pv-terracotta)]' : ''}`}>
+                {card.value}
+              </p>
+              <p className="mt-1 text-xs text-white/60">{card.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Panel title="Tempo médio de cada etapa">
+        {report.stages.length === 0 ? <Empty>Nenhum pedido neste período.</Empty> : null}
+        <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {report.stages.map((stage, index) => (
+            <li key={stage.label} className="rounded-2xl bg-[var(--pv-cream)]/60 px-4 py-3">
+              <p className="text-[11px] font-bold uppercase tracking-[1.2px] text-[var(--pv-ink)]/45">
+                {index + 1}. {STAGE_HINT[stage.label] || stage.label}
+              </p>
+              <p className="mt-1 text-sm font-semibold">{stage.label}</p>
+              <p className="mt-2 font-display text-2xl tabular-nums">
+                {stage.averageMinutes ? minutesLabel(stage.averageMinutes) : 'Sem relógio'}
+              </p>
+              <p className="mt-1 text-xs text-[var(--pv-ink)]/60">
+                {stage.averageMinutes
+                  ? `mediana ${minutesLabel(stage.medianMinutes ?? stage.averageMinutes)} · ${plural(stage.count, 'passagem', 'passagens')}`
+                  : `${plural(stage.count, 'passagem sem duração', 'passagens sem duração')}`}
+              </p>
+            </li>
+          ))}
+        </ol>
+      </Panel>
+
+      <Panel title="Onde os pedidos pararam">
+        {report.current.length === 0 ? <Empty>Nenhum pedido neste período.</Empty> : null}
+        <ul className="space-y-3">
+          {report.current.map((item) => (
+            <li key={item.label}>
+              <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium">{item.label}</span>
+                <span className="tabular-nums">{item.count}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[var(--pv-line)]">
+                <div
+                  className="h-full rounded-full bg-[#0A1228]"
+                  style={{ width: `${Math.max(4, (item.count / biggest) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </div>
+  )
+}
+
+function minutesLabel(value: number) {
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} min`
 }
 
 function FaturamentoView({ report, showDate }: { report: FaturamentoReport; showDate: boolean }) {

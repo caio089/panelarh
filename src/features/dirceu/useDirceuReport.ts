@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { isDirceuPeriod, isIsoDate, periodBounds, todayInFortaleza, type DirceuPeriod } from './day'
 import { isDirceuCategory, type DirceuCategory, type DirceuPayload } from './types'
@@ -6,6 +6,7 @@ import { isDirceuCategory, type DirceuCategory, type DirceuPayload } from './typ
 const DAY = 'dia'
 const CATEGORY = 'cat'
 const PERIOD = 'periodo'
+const REFRESH_MS = 10 * 60 * 1000
 
 /** Prefixo evita colidir com o `periodo` do RH na página da unidade. */
 function paramName(prefix: string, name: string) {
@@ -28,6 +29,7 @@ export function useDirceuReport(paramPrefix = '') {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const requestFresh = useRef(false)
 
   const setDay = useCallback(
     (next: string) => {
@@ -89,9 +91,14 @@ export function useDirceuReport(paramPrefix = '') {
 
     const controller = new AbortController()
     let cancelled = false
+    const fresh = requestFresh.current
+    requestFresh.current = false
     setLoading(true)
     setError('')
-    setData(null)
+    setData((current) => {
+      if (fresh && current?.category === category && current.period === period && current.date === day) return current
+      return null
+    })
 
     async function load(selected: DirceuCategory) {
       let lastMessage = 'Não foi possível carregar este relatório.'
@@ -99,7 +106,8 @@ export function useDirceuReport(paramPrefix = '') {
         if (cancelled) return
         let sawReport = false
         try {
-          const response = await fetch(`/api/dirceu?dia=${day}&categoria=${selected}&periodo=${period}`, {
+          const refresh = fresh ? '&atualiza=1' : ''
+          const response = await fetch(`/api/dirceu?dia=${day}&categoria=${selected}&periodo=${period}${refresh}`, {
             signal: controller.signal,
           })
           if (!response.ok || !response.body) {
@@ -144,7 +152,7 @@ export function useDirceuReport(paramPrefix = '') {
         }
       }
       if (!cancelled) {
-        setData(null)
+        if (!fresh) setData(null)
         setError(lastMessage)
       }
     }
@@ -159,6 +167,15 @@ export function useDirceuReport(paramPrefix = '') {
     }
   }, [day, period, category, reloadKey])
 
+  useEffect(() => {
+    if (!category || period !== 'dia') return
+    const timer = window.setInterval(() => {
+      requestFresh.current = true
+      setReloadKey((value) => value + 1)
+    }, REFRESH_MS)
+    return () => window.clearInterval(timer)
+  }, [category, period])
+
   return {
     day,
     setDay,
@@ -170,6 +187,9 @@ export function useDirceuReport(paramPrefix = '') {
     data,
     error,
     loading,
-    retry: () => setReloadKey((value) => value + 1),
+    retry: () => {
+      requestFresh.current = true
+      setReloadKey((value) => value + 1)
+    },
   }
 }
