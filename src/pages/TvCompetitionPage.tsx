@@ -14,9 +14,8 @@ type UnitScore = {
 // estiverem disponíveis, esta lista será preenchida pelo consolidado Saipos.
 const DEMO_UNITS: UnitScore[] = [
   { name: 'Dirceu', sales: 18420, orders: 438, kitchenMinutes: 12.4, goal: 88, accent: '#F4B942' },
-  { name: 'Aldeota', sales: 17180, orders: 405, kitchenMinutes: 11.8, goal: 82, accent: '#E15B3F' },
-  { name: 'Parangaba', sales: 15340, orders: 371, kitchenMinutes: 13.6, goal: 74, accent: '#80C997' },
-  { name: 'Benfica', sales: 13920, orders: 342, kitchenMinutes: 14.1, goal: 67, accent: '#9BA7FF' },
+  { name: 'Promorar', sales: 17180, orders: 405, kitchenMinutes: 11.8, goal: 82, accent: '#E15B3F' },
+  { name: 'Mocambinho', sales: 15340, orders: 371, kitchenMinutes: 13.6, goal: 74, accent: '#80C997' },
 ]
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
