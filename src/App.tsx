@@ -19,6 +19,7 @@ import { UnitOverviewTab } from '@/pages/unit/UnitOverviewTab'
 import { UnitCollaboratorsTab } from '@/pages/unit/UnitCollaboratorsTab'
 import { UnitScheduleTab } from '@/pages/unit/UnitScheduleTab'
 import { GestaoStoreProvider } from '@/features/gestao/GestaoStoreProvider'
+import { TvCompetitionPage } from '@/pages/TvCompetitionPage'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="/" element={<CareersPage />} />
               <Route path="/vagas/:id" element={<JobDetailPage />} />
               <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
+              <Route path="/tv/competicao" element={<TvCompetitionPage />} />
 
               {/* Legado candidato → site público */}
               <Route path="/auth" element={<Navigate to="/" replace />} />
