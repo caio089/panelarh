@@ -12,4 +12,5 @@ export function pipeDirceuReport(
     write(chunk: string): boolean
     end(chunk?: string): void
   },
+  fresh?: boolean,
 ): Promise<void>
