@@ -1,5 +1,7 @@
-import { Clock3, Crown, Flame, Trophy, UtensilsCrossed } from 'lucide-react'
+import { CalendarDays, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
 type UnitScore = {
   name: string
@@ -10,7 +12,7 @@ type UnitScore = {
 }
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
-const REFRESH_MS = 2 * 60 * 1000
+const REFRESH_MS = 60 * 1000
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
@@ -20,12 +22,31 @@ function formatDate(date: Date) {
   }).format(date)
 }
 
+function isNightServiceWindow(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+  const minutes = hour * 60 + minute
+  return minutes >= 17 * 60 + 30 || minutes <= 2 * 60 + 30
+}
+
 export function TvCompetitionPage() {
+  const [params, setParams] = useSearchParams()
+  const today = todayInFortaleza()
+  const rawDate = params.get('dia')
+  const date = isIsoDate(rawDate) && rawDate <= today ? rawDate : today
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
   const [units, setUnits] = useState<UnitScore[]>([])
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [automaticRefresh, setAutomaticRefresh] = useState(() => isNightServiceWindow())
+
   useEffect(() => {
-    const interval = window.setInterval(() => setUpdatedAt(new Date()), 60_000)
+    const updateSchedule = () => setAutomaticRefresh(isNightServiceWindow())
+    updateSchedule()
+    const interval = window.setInterval(updateSchedule, REFRESH_MS)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -33,7 +54,7 @@ export function TvCompetitionPage() {
     let alive = true
     async function load() {
       try {
-        const response = await fetch('/api/competition')
+        const response = await fetch(`/api/competition?dia=${date}`)
         const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
         if (!alive) return
@@ -45,12 +66,25 @@ export function TvCompetitionPage() {
       }
     }
     void load()
-    const interval = window.setInterval(() => void load(), REFRESH_MS)
     return () => {
       alive = false
-      window.clearInterval(interval)
     }
-  }, [])
+  }, [date, refreshKey])
+
+  useEffect(() => {
+    if (!automaticRefresh || date !== today) return
+    const interval = window.setInterval(() => setRefreshKey((value) => value + 1), REFRESH_MS)
+    return () => window.clearInterval(interval)
+  }, [automaticRefresh, date, today])
+
+  function chooseDate(next: string) {
+    if (!isIsoDate(next) || next > today) return
+    setParams((current) => {
+      const updated = new URLSearchParams(current)
+      updated.set('dia', next)
+      return updated
+    }, { replace: true })
+  }
 
   const revenueRanking = [...units].sort((a, b) => b.sales - a.sales)
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity))
@@ -78,12 +112,18 @@ export function TvCompetitionPage() {
         <section className="flex flex-col justify-between gap-5 py-6 lg:flex-row lg:items-end lg:py-8">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#E97A61] sm:text-sm">Desafio entre unidades</p>
-            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">Quem está no topo hoje?</h1>
-            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · Acumulado do dia</p>
+            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">Quem está no topo {date === today ? 'hoje' : 'neste dia'}?</h1>
+            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · Acumulado de {date.split('-').reverse().join('/')}</p>
           </div>
-          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3">
-            <Flame className="text-[#F4B942]" size={25} />
-            <p className="text-sm leading-tight text-white/70">A disputa está acesa.<br /><strong className="text-white">Cada pedido conta.</strong></p>
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3">
+            <CalendarDays className="text-[#F4B942]" size={22} />
+            <label className="text-sm text-white/70">
+              <span className="mr-2">Dia</span>
+              <input type="date" value={date} max={today} onChange={(event) => chooseDate(event.target.value)} className="rounded-lg bg-white/10 px-2 py-1.5 text-white outline-none [color-scheme:dark]" />
+            </label>
+            <button type="button" aria-label="Atualizar placar" onClick={() => setRefreshKey((value) => value + 1)} className="rounded-lg bg-white/10 p-2 text-[#EFE3C4] hover:bg-white/15">
+              <RefreshCw size={17} />
+            </button>
           </div>
         </section>
 
@@ -124,7 +164,7 @@ export function TvCompetitionPage() {
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">{error || 'Dados Saipos · atualização automática'}</span>
+          <span className="text-right">{error || (automaticRefresh && date === today ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
         </footer>
       </div>
     </main>

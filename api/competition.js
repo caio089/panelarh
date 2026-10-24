@@ -7,9 +7,21 @@ function kitchenMinutes(report) {
   return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
 }
 
+function isIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
-  const date = todayInFortaleza()
+  const today = todayInFortaleza()
+  const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
+  if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
+    return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
+  }
+  const date = requestedDate || today
   const controller = new AbortController()
   req.on?.('close', () => controller.abort())
 
