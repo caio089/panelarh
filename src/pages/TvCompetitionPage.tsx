@@ -1,5 +1,5 @@
 import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
@@ -44,10 +44,12 @@ export function TvCompetitionPage() {
   const period: CompetitionPeriod = rawPeriod === 'mes' ? 'mes' : 'dia'
   const date = isIsoDate(rawDate) && rawDate <= today ? rawDate : currentCompetitionDay
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
-  const [units, setUnits] = useState<UnitScore[]>([])
+  const [unitsByPeriod, setUnitsByPeriod] = useState<Record<CompetitionPeriod, UnitScore[]>>({ dia: [], mes: [] })
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [automaticRefresh, setAutomaticRefresh] = useState(() => isNightServiceWindow())
+  const monthPrefetchDate = useRef<string | null>(null)
+  const units = unitsByPeriod[period]
 
   useEffect(() => {
     const updateSchedule = () => setAutomaticRefresh(isNightServiceWindow())
@@ -60,12 +62,14 @@ export function TvCompetitionPage() {
     const interval = window.setInterval(() => {
       setParams((current) => {
         const updated = new URLSearchParams(current)
-        updated.set('periodo', current.get('periodo') === 'mes' ? 'dia' : 'mes')
+        const currentPeriod = current.get('periodo') === 'mes' ? 'mes' : 'dia'
+        if (currentPeriod === 'dia' && unitsByPeriod.mes.length === 0) return current
+        updated.set('periodo', currentPeriod === 'mes' ? 'dia' : 'mes')
         return updated
       }, { replace: true })
     }, AUTO_SLIDE_MS)
     return () => window.clearInterval(interval)
-  }, [setParams])
+  }, [setParams, unitsByPeriod.mes.length])
 
   useEffect(() => {
     let alive = true
@@ -75,7 +79,7 @@ export function TvCompetitionPage() {
         const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
         if (!alive) return
-        setUnits(payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })))
+        setUnitsByPeriod((current) => ({ ...current, [period]: payload.units!.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
         setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
         setError('')
         if (period === 'dia') {
@@ -92,7 +96,7 @@ export function TvCompetitionPage() {
         const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units || !alive) return
         const kitchenByUnit = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
-        setUnits((current) => current.map((unit) => ({ ...unit, kitchenMinutes: kitchenByUnit.get(unit.name) ?? null })))
+        setUnitsByPeriod((current) => ({ ...current, dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: kitchenByUnit.get(unit.name) ?? null })) }))
       } catch {
         // O ranking de vendas permanece disponível mesmo se a cozinha atrasar.
       }
@@ -102,6 +106,24 @@ export function TvCompetitionPage() {
       alive = false
     }
   }, [date, period, refreshKey])
+
+  useEffect(() => {
+    if (period !== 'dia' || unitsByPeriod.mes.length > 0 || monthPrefetchDate.current === date) return
+    monthPrefetchDate.current = date
+    let alive = true
+    async function prefetchMonth() {
+      try {
+        const response = await fetch(`/api/competition?dia=${date}&periodo=mes`)
+        const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        if (!response.ok || !payload.units || !alive) return
+        setUnitsByPeriod((current) => ({ ...current, mes: payload.units!.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
+      } catch {
+        monthPrefetchDate.current = null
+      }
+    }
+    void prefetchMonth()
+    return () => { alive = false }
+  }, [date, period, refreshKey, unitsByPeriod.mes.length])
 
   useEffect(() => {
     if (!automaticRefresh || period !== 'dia' || date !== currentCompetitionDay) return
