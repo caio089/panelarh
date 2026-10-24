@@ -1,4 +1,4 @@
-import { CalendarDays, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
+import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
@@ -10,6 +10,8 @@ type UnitScore = {
   kitchenMinutes: number | null
   accent: string
 }
+
+type CompetitionPeriod = 'dia' | 'mes'
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
 const REFRESH_MS = 60 * 1000
@@ -37,6 +39,8 @@ export function TvCompetitionPage() {
   const today = todayInFortaleza()
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
+  const rawPeriod = params.get('periodo')
+  const period: CompetitionPeriod = rawPeriod === 'mes' ? 'mes' : 'dia'
   const date = isIsoDate(rawDate) && rawDate <= today ? rawDate : currentCompetitionDay
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
   const [units, setUnits] = useState<UnitScore[]>([])
@@ -55,7 +59,7 @@ export function TvCompetitionPage() {
     let alive = true
     async function load() {
       try {
-        const response = await fetch(`/api/competition?dia=${date}`)
+        const response = await fetch(`/api/competition?dia=${date}&periodo=${period}`)
         const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
         if (!alive) return
@@ -70,13 +74,13 @@ export function TvCompetitionPage() {
     return () => {
       alive = false
     }
-  }, [date, refreshKey])
+  }, [date, period, refreshKey])
 
   useEffect(() => {
-    if (!automaticRefresh || date !== currentCompetitionDay) return
+    if (!automaticRefresh || period !== 'dia' || date !== currentCompetitionDay) return
     const interval = window.setInterval(() => setRefreshKey((value) => value + 1), REFRESH_MS)
     return () => window.clearInterval(interval)
-  }, [automaticRefresh, date, currentCompetitionDay])
+  }, [automaticRefresh, date, period, currentCompetitionDay])
 
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
@@ -87,10 +91,21 @@ export function TvCompetitionPage() {
     }, { replace: true })
   }
 
+  function choosePeriod(next: CompetitionPeriod) {
+    setParams((current) => {
+      const updated = new URLSearchParams(current)
+      updated.set('periodo', next)
+      return updated
+    }, { replace: true })
+  }
+
   const revenueRanking = [...units].sort((a, b) => b.sales - a.sales)
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity))
   const leader = revenueRanking[0]
   const kitchenLeader = kitchenRanking.find((unit) => unit.kitchenMinutes !== null)
+  const totalSales = units.reduce((total, unit) => total + unit.sales, 0)
+  const totalOrders = units.reduce((total, unit) => total + unit.orders, 0)
+  const periodLabel = period === 'mes' ? 'mês' : 'dia'
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#071024] px-5 py-5 text-[#F9F6EC] sm:px-9 lg:px-12 lg:py-8">
@@ -113,13 +128,17 @@ export function TvCompetitionPage() {
         <section className="flex flex-col justify-between gap-5 py-6 lg:flex-row lg:items-end lg:py-8">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#E97A61] sm:text-sm">Desafio entre unidades</p>
-            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">Quem está no topo {date === today ? 'hoje' : 'neste dia'}?</h1>
-            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · Acumulado de {date.split('-').reverse().join('/')}</p>
+            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">Ranking do {periodLabel}</h1>
+            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · Acumulado até {date.split('-').reverse().join('/')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3">
-            <CalendarDays className="text-[#F4B942]" size={22} />
+            <div className="flex overflow-hidden rounded-lg border border-white/10 text-xs font-bold">
+              <button type="button" onClick={() => choosePeriod('dia')} className={`px-3 py-2 ${period === 'dia' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Dia</button>
+              <button type="button" onClick={() => choosePeriod('mes')} className={`px-3 py-2 ${period === 'mes' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Mês</button>
+            </div>
+            {period === 'mes' ? <CalendarRange className="text-[#F4B942]" size={22} /> : <CalendarDays className="text-[#F4B942]" size={22} />}
             <label className="text-sm text-white/70">
-              <span className="mr-2">Dia</span>
+              <span className="mr-2">Até</span>
               <input type="date" value={date} max={today} onChange={(event) => chooseDate(event.target.value)} className="rounded-lg bg-white/10 px-2 py-1.5 text-white outline-none [color-scheme:dark]" />
             </label>
             <button type="button" aria-label="Atualizar placar" onClick={() => setRefreshKey((value) => value + 1)} className="rounded-lg bg-white/10 p-2 text-[#EFE3C4] hover:bg-white/15">
@@ -141,34 +160,43 @@ export function TvCompetitionPage() {
             </div>
             <div className="relative mt-7 flex items-end justify-between gap-4 border-t border-white/15 pt-5">
               <p className="font-display text-3xl text-[#F4B942] sm:text-4xl">{leader ? money.format(leader.sales) : '—'}</p>
-              <p className="text-right text-sm text-white/65">faturamento<br />do dia</p>
+              <p className="text-right text-sm text-white/65">faturamento<br />do {periodLabel}</p>
             </div>
           </article>
 
           <article className="rounded-[28px] border border-white/10 bg-white/[0.06] p-5 sm:p-7">
-            <div className="flex items-center gap-2 text-[#80C997]"><UtensilsCrossed size={21} /><p className="text-xs font-bold uppercase tracking-[0.18em]">Cozinha mais rápida</p></div>
+            <div className="flex items-center gap-2 text-[#80C997]">{period === 'dia' ? <UtensilsCrossed size={21} /> : <Trophy size={21} />}<p className="text-xs font-bold uppercase tracking-[0.18em]">{period === 'dia' ? 'Cozinha mais rápida' : 'Informações do mês'}</p></div>
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{kitchenLeader?.name ?? 'Atualizando'}</h2>
-                <p className="mt-2 text-base text-white/65">do pedido ao pronto</p>
+                <h2 className="font-display text-4xl sm:text-5xl">{period === 'dia' ? kitchenLeader?.name ?? 'Atualizando' : `${totalOrders} pedidos`}</h2>
+                <p className="mt-2 text-base text-white/65">{period === 'dia' ? 'do pedido ao pronto' : 'realizados pelas 3 unidades'}</p>
               </div>
-              <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—'}<span className="text-xl">{kitchenLeader ? ' min' : ''}</span></p>
+              <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{period === 'dia' ? kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—' : money.format(totalSales)}<span className="text-xl">{period === 'dia' && kitchenLeader ? ' min' : ''}</span></p>
             </div>
-            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55"><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo hoje</div>
+            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55">{period === 'dia' ? <><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo no dia</> : <>Faturamento e pedidos acumulados até a data selecionada</>}</div>
           </article>
         </section>
 
         <section className="mt-5 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
-          <RankingCard title="Ranking de vendas" subtitle="Faturamento acumulado" icon={<Trophy size={20} />} units={revenueRanking} type="sales" />
-          <RankingCard title="Velocidade da cozinha" subtitle="Menos minutos, melhor posição" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
+          <RankingCard title={`Ranking de vendas do ${periodLabel}`} subtitle="Faturamento e pedidos por unidade" icon={<Trophy size={20} />} units={revenueRanking} type="sales" />
+          {period === 'dia' ? <RankingCard title="Velocidade da cozinha" subtitle="Menos minutos, melhor posição" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" /> : <InformationCard units={revenueRanking} />}
         </section>
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">{error || (automaticRefresh && date === currentCompetitionDay ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
+          <span className="text-right">{error || (automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
         </footer>
       </div>
     </main>
+  )
+}
+
+function InformationCard({ units }: { units: UnitScore[] }) {
+  return (
+    <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4"><div><h2 className="font-display text-xl sm:text-2xl">Informações das unidades</h2><p className="mt-1 text-xs text-white/50">Resultado acumulado no mês</p></div><span className="rounded-xl bg-white/8 p-2.5 text-[#EFE3C4]"><CalendarRange size={20} /></span></div>
+      <div className="mt-2 divide-y divide-white/8">{units.map((unit) => <div key={unit.name} className="flex items-center justify-between gap-3 py-4"><div><p className="font-bold">{unit.name}</p><p className="mt-1 text-xs text-white/50">{unit.orders} pedidos</p></div><strong className="font-display text-lg">{money.format(unit.sales)}</strong></div>)}</div>
+    </article>
   )
 }
 
