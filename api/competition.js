@@ -1,5 +1,7 @@
 import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { SAIPOS_UNITS } from '../server/saiposUnits.js'
+import { waitUntil } from '@vercel/functions'
+import { readCompetitionCache, readLatestCompetitionCache, saveCompetitionCache } from '../server/competitionCache.js'
 
 function kitchenMinutes(report) {
   const stages = Array.isArray(report?.stages) ? report.stages : []
@@ -20,6 +22,7 @@ export default async function handler(req, res) {
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
   const kitchenOnly = req.query?.dados === 'cozinha'
+  const metric = kitchenOnly ? 'cozinha' : 'vendas'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
@@ -28,22 +31,19 @@ export default async function handler(req, res) {
   }
   const date = requestedDate || today
   const period = requestedPeriod
-  const controller = new AbortController()
-  req.on?.('close', () => controller.abort())
-
-  try {
+  const loadScoreboard = async (signal) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
         if (kitchenOnly) {
           let kitchen = null
           try {
-            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal: controller.signal, unit: unit.name, cacheScope: unit.id })
+            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal, unit: unit.name, cacheScope: unit.id })
           } catch {
             // A tela já mostra as vendas; a cozinha será atualizada na próxima tentativa.
           }
           return { id: unit.id, name: unit.name, sales: 0, orders: 0, kitchenMinutes: kitchen ? kitchenMinutes(kitchen.report) : null }
         }
-        const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal: controller.signal, unit: unit.name, cacheScope: unit.id })
+        const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal, unit: unit.name, cacheScope: unit.id })
         return {
           id: unit.id,
           name: unit.name,
@@ -53,8 +53,29 @@ export default async function handler(req, res) {
         }
       }),
     )
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120')
-    res.status(200).json({ date, period, fetchedAt: new Date().toISOString(), units })
+    return { date, period, metric, fetchedAt: new Date().toISOString(), units }
+  }
+
+  const refreshScoreboard = async () => {
+    const payload = await loadScoreboard(new AbortController().signal)
+    await saveCompetitionCache(period, date, metric, payload)
+    return payload
+  }
+
+  const cached = await readCompetitionCache(period, date, metric) || await readLatestCompetitionCache(period, metric)
+  if (cached) {
+    waitUntil(refreshScoreboard().catch(() => undefined))
+    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
+    return res.status(200).json({ ...cached, date, cached: true, stale: cached.date !== date })
+  }
+
+  const controller = new AbortController()
+  req.on?.('close', () => controller.abort())
+  try {
+    const payload = await loadScoreboard(controller.signal)
+    await saveCompetitionCache(period, date, metric, payload)
+    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
+    res.status(200).json(payload)
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : 'Não foi possível atualizar a competição.' })
   }

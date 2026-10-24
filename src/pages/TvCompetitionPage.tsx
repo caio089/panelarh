@@ -15,6 +15,7 @@ type CompetitionPeriod = 'dia' | 'mes'
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
 const REFRESH_MS = 60 * 1000
+const AUTO_SLIDE_MS = 18 * 1000
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
@@ -54,6 +55,17 @@ export function TvCompetitionPage() {
     const interval = window.setInterval(updateSchedule, REFRESH_MS)
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setParams((current) => {
+        const updated = new URLSearchParams(current)
+        updated.set('periodo', current.get('periodo') === 'mes' ? 'dia' : 'mes')
+        return updated
+      }, { replace: true })
+    }, AUTO_SLIDE_MS)
+    return () => window.clearInterval(interval)
+  }, [setParams])
 
   useEffect(() => {
     let alive = true
@@ -199,7 +211,7 @@ export function TvCompetitionPage() {
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">{error || (automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
+          <span className="text-right">{error || (automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática a cada 1 min · tela alterna Dia e Mês' : 'Tela alterna Dia e Mês automaticamente')}</span>
         </footer>
       </div>
     </main>
