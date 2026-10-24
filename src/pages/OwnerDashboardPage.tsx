@@ -3,7 +3,7 @@ import { Sparkles } from 'lucide-react'
 import { PageHeader } from '@/components/ui'
 import { RhSummary } from '@/features/gestao/components/RhSummary'
 import { useGestao } from '@/features/gestao/useGestao'
-import { DirceuOverview } from '@/features/dirceu/DirceuOverview'
+import { CompetitionAdminPanel } from '@/features/dirceu/CompetitionAdminPanel'
 
 function greeting(): string {
   const hour = new Date().getHours()
@@ -41,7 +41,7 @@ export function OwnerDashboardPage() {
             <Sparkles size={20} />
           </span>
         </Link>
-        <DirceuOverview />
+        <CompetitionAdminPanel />
         <RhSummary view={view} />
 
         <section>
