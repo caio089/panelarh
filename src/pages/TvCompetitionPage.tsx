@@ -1,7 +1,7 @@
 import { CalendarDays, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
+import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
 type UnitScore = {
   name: string
@@ -35,8 +35,9 @@ function isNightServiceWindow(now = new Date()) {
 export function TvCompetitionPage() {
   const [params, setParams] = useSearchParams()
   const today = todayInFortaleza()
+  const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
-  const date = isIsoDate(rawDate) && rawDate <= today ? rawDate : today
+  const date = isIsoDate(rawDate) && rawDate <= today ? rawDate : currentCompetitionDay
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
   const [units, setUnits] = useState<UnitScore[]>([])
   const [error, setError] = useState('')
@@ -72,10 +73,10 @@ export function TvCompetitionPage() {
   }, [date, refreshKey])
 
   useEffect(() => {
-    if (!automaticRefresh || date !== today) return
+    if (!automaticRefresh || date !== currentCompetitionDay) return
     const interval = window.setInterval(() => setRefreshKey((value) => value + 1), REFRESH_MS)
     return () => window.clearInterval(interval)
-  }, [automaticRefresh, date, today])
+  }, [automaticRefresh, date, currentCompetitionDay])
 
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
@@ -164,7 +165,7 @@ export function TvCompetitionPage() {
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">{error || (automaticRefresh && date === today ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
+          <span className="text-right">{error || (automaticRefresh && date === currentCompetitionDay ? 'Atualização automática a cada 1 min' : 'Atualização manual fora de 17h30–02h30')}</span>
         </footer>
       </div>
     </main>

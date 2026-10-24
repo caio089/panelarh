@@ -4,6 +4,26 @@ export function todayInFortaleza(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now)
 }
 
+/**
+ * The competition follows the restaurant shift, not the calendar day. Before
+ * the evening service starts, the most recent complete shift is yesterday;
+ * after midnight it remains yesterday until the service window ends.
+ */
+export function competitionDayInFortaleza(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+  const minutes = hour * 60 + minute
+  const today = todayInFortaleza(now)
+
+  return minutes >= 17 * 60 + 30 ? today : shiftIsoDate(today, -1)
+}
+
 export function isIsoDate(value: string | null): value is string {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [year, month, day] = value.split('-').map(Number)
