@@ -11,25 +11,31 @@ const ATTEMPTS = 2
 const REQUEST_TIMEOUT_MS = 18000
 const MAX_IN_FLIGHT = 2
 
-/** No máximo duas consultas ao mesmo tempo: a Saipos devolve 504 se o pool enche. */
-let inFlight = 0
-const waiters = []
+/** Cada credencial Saipos suporta no máximo duas consultas concorrentes. */
+const requestPools = new Map()
 
-function oneAtATime(task) {
+function requestPool(scope) {
+  const key = scope || 'dirceu'
+  if (!requestPools.has(key)) requestPools.set(key, { inFlight: 0, waiters: [] })
+  return requestPools.get(key)
+}
+
+function oneAtATime(task, scope) {
   return new Promise((resolve, reject) => {
+    const pool = requestPool(scope)
     const run = () => {
-      inFlight += 1
+      pool.inFlight += 1
       Promise.resolve()
         .then(task)
         .then(resolve, reject)
         .finally(() => {
-          inFlight -= 1
-          const next = waiters.shift()
+          pool.inFlight -= 1
+          const next = pool.waiters.shift()
           if (next) next()
         })
     }
-    if (inFlight < MAX_IN_FLIGHT) run()
-    else waiters.push(run)
+    if (pool.inFlight < MAX_IN_FLIGHT) run()
+    else pool.waiters.push(run)
   })
 }
 
@@ -120,7 +126,7 @@ function fetchWithDeadline(url, token, signal) {
   })
 }
 
-async function saiposGet(path, params, token, signal) {
+async function saiposGet(path, params, token, signal, cacheScope = 'dirceu') {
   const url = new URL(`${SAIPOS_BASE}${path}`)
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value))
 
@@ -153,13 +159,13 @@ async function saiposGet(path, params, token, signal) {
       }
     }
     throw new Error(lastMessage)
-  })
+  }, cacheScope)
 }
 
-async function* saiposPages(path, params, token, signal, maxPages = MAX_PAGES, pageSize = PAGE_SIZE) {
+async function* saiposPages(path, params, token, signal, maxPages = MAX_PAGES, pageSize = PAGE_SIZE, cacheScope = 'dirceu') {
   for (let page = 0; page < maxPages; page += 1) {
     const batch = asRows(
-      await saiposGet(path, { ...params, p_limit: pageSize, p_offset: page * pageSize }, token, signal),
+      await saiposGet(path, { ...params, p_limit: pageSize, p_offset: page * pageSize }, token, signal, cacheScope),
     )
     const last = batch.length < pageSize || page === maxPages - 1
     yield { batch, last }
@@ -651,6 +657,7 @@ async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 
     signal,
     spec.maxPages || 2,
     spec.pageSize || PAGE_SIZE,
+    cacheScope,
   )) {
     rows.push(...page.batch)
     if (page.last) break
