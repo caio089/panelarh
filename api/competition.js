@@ -19,6 +19,7 @@ export default async function handler(req, res) {
   const today = todayInFortaleza()
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
+  const kitchenOnly = req.query?.dados === 'cozinha'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
@@ -33,16 +34,22 @@ export default async function handler(req, res) {
   try {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
+        if (kitchenOnly) {
+          let kitchen = null
+          try {
+            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal: controller.signal, unit: unit.name, cacheScope: unit.id })
+          } catch {
+            // A tela já mostra as vendas; a cozinha será atualizada na próxima tentativa.
+          }
+          return { id: unit.id, name: unit.name, sales: 0, orders: 0, kitchenMinutes: kitchen ? kitchenMinutes(kitchen.report) : null }
+        }
         const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal: controller.signal, unit: unit.name, cacheScope: unit.id })
-        const kitchen = period === 'dia'
-          ? await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal: controller.signal, unit: unit.name, cacheScope: unit.id })
-          : null
         return {
           id: unit.id,
           name: unit.name,
           sales: sales.report.revenue,
           orders: sales.report.count,
-          kitchenMinutes: kitchen ? kitchenMinutes(kitchen.report) : null,
+          kitchenMinutes: null,
         }
       }),
     )

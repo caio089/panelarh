@@ -66,8 +66,23 @@ export function TvCompetitionPage() {
         setUnits(payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })))
         setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
         setError('')
+        if (period === 'dia') {
+          void loadKitchen()
+        }
       } catch (reason) {
         if (alive) setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o placar.')
+      }
+    }
+
+    async function loadKitchen() {
+      try {
+        const response = await fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha`)
+        const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        if (!response.ok || !payload.units || !alive) return
+        const kitchenByUnit = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
+        setUnits((current) => current.map((unit) => ({ ...unit, kitchenMinutes: kitchenByUnit.get(unit.name) ?? null })))
+      } catch {
+        // O ranking de vendas permanece disponível mesmo se a cozinha atrasar.
       }
     }
     void load()
