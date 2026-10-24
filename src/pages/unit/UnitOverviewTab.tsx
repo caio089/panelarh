@@ -19,11 +19,12 @@ export function UnitOverviewTab() {
   const view = useGestao(period, unitId)
   const [selected, setSelected] = useState<CollaboratorStats | null>(null)
 
-  const showsSaipos = unitId === 'unit-dirceu'
+  const saiposUnit =
+    unitId === 'unit-dirceu' ? 'dirceu' : unitId === 'unit-promorar' ? 'promorar' : unitId === 'unit-mocambinho' ? 'mocambinho' : null
 
   return (
     <div className="pv-stagger space-y-5">
-      {showsSaipos ? <DirceuOverview paramPrefix="ops" /> : null}
+      {saiposUnit ? <DirceuOverview paramPrefix="ops" unit={saiposUnit} unitName={unitName} /> : null}
       <div className="flex justify-end">
         <PeriodSelect value={period} onChange={setPeriod} />
       </div>

@@ -6,8 +6,8 @@ import { DirceuReportView } from './DirceuReports'
 import { DIRCEU_CATEGORIES } from './types'
 import { useDirceuReport } from './useDirceuReport'
 
-export function DirceuOverview({ paramPrefix = '' }: { paramPrefix?: string }) {
-  const { day, setDay, period, setPeriod, bounds, category, setCategory, data, error, loading, retry } = useDirceuReport(paramPrefix)
+export function DirceuOverview({ paramPrefix = '', unit = 'dirceu', unitName = 'Dirceu' }: { paramPrefix?: string; unit?: string; unitName?: string }) {
+  const { day, setDay, period, setPeriod, bounds, category, setCategory, data, error, loading, retry } = useDirceuReport(paramPrefix, unit)
   const today = todayInFortaleza()
   const report =
     category && data && data.category === category && data.period === period && data.start === bounds.start && data.end === bounds.end
@@ -32,7 +32,7 @@ export function DirceuOverview({ paramPrefix = '' }: { paramPrefix?: string }) {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[1.6px] text-[var(--pv-cream)]/70">
-              <Store size={13} /> Unidade Dirceu
+              <Store size={13} /> Unidade {unitName}
             </p>
             <h2 className="mt-1 font-display text-3xl">{titles[period]}</h2>
             <p className="mt-1 text-sm text-[var(--pv-cream)]/75">

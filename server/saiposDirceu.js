@@ -213,9 +213,9 @@ function eachDay(start, end) {
   return days
 }
 
-function reportBody(day, period, bounds, category, rows, summarize, partial) {
+function reportBody(day, period, bounds, category, rows, summarize, partial, unit = 'Dirceu') {
   return {
-    unit: 'Dirceu',
+    unit,
     date: day,
     period,
     start: bounds.start,
@@ -640,8 +640,8 @@ const CATEGORIES = {
   financeiro: { path: '/search_financial_transactions', filter: 'date', summarize: (rows) => summarizeFinance(rows) },
 }
 
-async function loadOneDay(spec, day, token, signal, fresh = false) {
-  const key = `${spec.path}:${spec.filter}:${day}`
+async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 'dirceu') {
+  const key = `${cacheScope}:${spec.path}:${spec.filter}:${day}`
   if (!fresh && rawCache.has(key)) return rawCache.get(key)
   const rows = []
   for await (const page of saiposPages(
@@ -659,7 +659,7 @@ async function loadOneDay(spec, day, token, signal, fresh = false) {
   return rows
 }
 
-async function* loadRangeSteps(spec, start, end, token, signal, fresh = false) {
+async function* loadRangeSteps(spec, start, end, token, signal, fresh = false, cacheScope = 'dirceu') {
   const days = eachDay(start, end)
   const collected = new Map()
   const queue = []
@@ -670,7 +670,7 @@ async function* loadRangeSteps(spec, start, end, token, signal, fresh = false) {
   }
 
   for (const [index, day] of days.entries()) {
-    void loadOneDay(spec, day, token, signal, fresh).then(
+    void loadOneDay(spec, day, token, signal, fresh, cacheScope).then(
       (rows) => {
         queue.push({ index, rows })
         wake()
@@ -705,10 +705,10 @@ async function* loadRangeSteps(spec, start, end, token, signal, fresh = false) {
   }
 }
 
-async function* streamDirceuReport(day, period, category, token, signal, fresh = false) {
+async function* streamDirceuReport(day, period, category, token, signal, fresh = false, unit = 'Dirceu', cacheScope = 'dirceu') {
   const spec = CATEGORIES[category]
   const bounds = periodBounds(day, period, todayInFortaleza())
-  const key = `${bounds.start}:${bounds.end}:${category}`
+  const key = `${cacheScope}:${bounds.start}:${bounds.end}:${category}`
   const cached = fresh ? null : dayCache.get(key)
   if (cached) {
     yield { status: 200, body: { ...cached, partial: false } }
@@ -717,8 +717,8 @@ async function* streamDirceuReport(day, period, category, token, signal, fresh =
 
   let latest = null
   try {
-    for await (const step of loadRangeSteps(spec, bounds.start, bounds.end, token, signal, fresh)) {
-      latest = reportBody(day, period, bounds, category, step.rows, spec.summarize, step.partial)
+    for await (const step of loadRangeSteps(spec, bounds.start, bounds.end, token, signal, fresh, cacheScope)) {
+      latest = reportBody(day, period, bounds, category, step.rows, spec.summarize, step.partial, unit)
       yield { status: 200, body: latest }
       if (!step.partial && !signal?.aborted) dayCache.set(key, latest)
     }
@@ -726,7 +726,7 @@ async function* streamDirceuReport(day, period, category, token, signal, fresh =
     if (error instanceof Error && error.name === 'AbortError') throw error
     const message = error instanceof Error ? error.message : 'Falha na consulta.'
     if (!latest) {
-      yield { status: 503, body: { error: message, date: day, period, ...bounds, unit: 'Dirceu', category } }
+      yield { status: 503, body: { error: message, date: day, period, ...bounds, unit, category } }
       return
     }
     yield { status: 200, body: { ...latest, partial: false, error: message } }
@@ -734,7 +734,7 @@ async function* streamDirceuReport(day, period, category, token, signal, fresh =
 }
 
 /** Entrega cada página assim que a Saipos responde, sem esperar o período inteiro. */
-export async function pipeDirceuReport(date, category, token, signal, period = 'dia', response, fresh = false) {
+export async function pipeDirceuReport(date, category, token, signal, period = 'dia', response, fresh = false, unit = 'Dirceu', cacheScope = 'dirceu') {
   const day = date || todayInFortaleza()
   const span = period === 'semana' || period === 'mes' ? period : 'dia'
   if (!isIsoDate(day)) {
@@ -758,7 +758,7 @@ export async function pipeDirceuReport(date, category, token, signal, period = '
 
   let opened = false
   try {
-    for await (const event of streamDirceuReport(day, span, category, token, signal, fresh)) {
+    for await (const event of streamDirceuReport(day, span, category, token, signal, fresh, unit, cacheScope)) {
       if (signal?.aborted || response.writableEnded) return
       if (!opened && event.status !== 200) {
         response.statusCode = event.status
@@ -791,4 +791,21 @@ export async function pipeDirceuReport(date, category, token, signal, period = '
     response.write(`${JSON.stringify({ error: 'Falha ao consultar a operação do Dirceu.', partial: false })}\n`)
     response.end()
   }
+}
+
+/** Carrega o resumo final para telas consolidadas, sem expor pedidos ou dados de clientes. */
+export async function getSaiposReport({ date, category, token, signal, period = 'dia', fresh = false, unit = 'Dirceu', cacheScope = 'dirceu' }) {
+  const day = date || todayInFortaleza()
+  const span = period === 'semana' || period === 'mes' ? period : 'dia'
+  if (!isIsoDate(day)) throw new Error('Informe o dia no formato AAAA-MM-DD.')
+  if (!CATEGORIES[category]) throw new Error('Categoria Saipos inválida.')
+  if (!normalizeToken(token)) throw new Error(`A chave da Saipos para ${unit} não está configurada no servidor.`)
+
+  let latest = null
+  for await (const event of streamDirceuReport(day, span, category, token, signal, fresh, unit, cacheScope)) {
+    if (event.status !== 200) throw new Error(event.body.error || 'Falha na consulta.')
+    latest = event.body
+  }
+  if (!latest) throw new Error('A Saipos não devolveu dados para esta consulta.')
+  return latest
 }

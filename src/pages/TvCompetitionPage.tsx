@@ -5,18 +5,12 @@ type UnitScore = {
   name: string
   sales: number
   orders: number
-  kitchenMinutes: number
-  goal: number
+  kitchenMinutes: number | null
   accent: string
 }
 
-// Dados temporários para a apresentação. Quando as credenciais de cada unidade
-// estiverem disponíveis, esta lista será preenchida pelo consolidado Saipos.
-const DEMO_UNITS: UnitScore[] = [
-  { name: 'Dirceu', sales: 18420, orders: 438, kitchenMinutes: 12.4, goal: 88, accent: '#F4B942' },
-  { name: 'Promorar', sales: 17180, orders: 405, kitchenMinutes: 11.8, goal: 82, accent: '#E15B3F' },
-  { name: 'Mocambinho', sales: 15340, orders: 371, kitchenMinutes: 13.6, goal: 74, accent: '#80C997' },
-]
+const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
+const REFRESH_MS = 2 * 60 * 1000
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
@@ -28,13 +22,40 @@ function formatDate(date: Date) {
 
 export function TvCompetitionPage() {
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
+  const [units, setUnits] = useState<UnitScore[]>([])
+  const [error, setError] = useState('')
   useEffect(() => {
     const interval = window.setInterval(() => setUpdatedAt(new Date()), 60_000)
     return () => window.clearInterval(interval)
   }, [])
-  const revenueRanking = [...DEMO_UNITS].sort((a, b) => b.sales - a.sales)
-  const kitchenRanking = [...DEMO_UNITS].sort((a, b) => a.kitchenMinutes - b.kitchenMinutes)
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const response = await fetch('/api/competition')
+        const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
+        if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
+        if (!alive) return
+        setUnits(payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })))
+        setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
+        setError('')
+      } catch (reason) {
+        if (alive) setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o placar.')
+      }
+    }
+    void load()
+    const interval = window.setInterval(() => void load(), REFRESH_MS)
+    return () => {
+      alive = false
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  const revenueRanking = [...units].sort((a, b) => b.sales - a.sales)
+  const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity))
   const leader = revenueRanking[0]
+  const kitchenLeader = kitchenRanking.find((unit) => unit.kitchenMinutes !== null)
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#071024] px-5 py-5 text-[#F9F6EC] sm:px-9 lg:px-12 lg:py-8">
@@ -72,14 +93,14 @@ export function TvCompetitionPage() {
             <p className="relative text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]">Líder em vendas</p>
             <div className="relative mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{leader.name}</h2>
-                <p className="mt-2 text-base text-white/65">{leader.orders} pedidos realizados</p>
+                <h2 className="font-display text-4xl sm:text-5xl">{leader?.name ?? 'Atualizando'}</h2>
+                <p className="mt-2 text-base text-white/65">{leader ? `${leader.orders} pedidos realizados` : 'Consultando as unidades'}</p>
               </div>
               <Trophy className="mb-1 shrink-0 text-[#F4B942]" size={52} />
             </div>
             <div className="relative mt-7 flex items-end justify-between gap-4 border-t border-white/15 pt-5">
-              <p className="font-display text-3xl text-[#F4B942] sm:text-4xl">{money.format(leader.sales)}</p>
-              <p className="text-right text-sm text-white/65">{leader.goal}%<br />da meta do dia</p>
+              <p className="font-display text-3xl text-[#F4B942] sm:text-4xl">{leader ? money.format(leader.sales) : '—'}</p>
+              <p className="text-right text-sm text-white/65">faturamento<br />do dia</p>
             </div>
           </article>
 
@@ -87,10 +108,10 @@ export function TvCompetitionPage() {
             <div className="flex items-center gap-2 text-[#80C997]"><UtensilsCrossed size={21} /><p className="text-xs font-bold uppercase tracking-[0.18em]">Cozinha mais rápida</p></div>
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{kitchenRanking[0].name}</h2>
+                <h2 className="font-display text-4xl sm:text-5xl">{kitchenLeader?.name ?? 'Atualizando'}</h2>
                 <p className="mt-2 text-base text-white/65">do pedido ao pronto</p>
               </div>
-              <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenRanking[0].kitchenMinutes.toLocaleString('pt-BR')}<span className="text-xl"> min</span></p>
+              <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—'}<span className="text-xl">{kitchenLeader ? ' min' : ''}</span></p>
             </div>
             <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55"><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo hoje</div>
           </article>
@@ -103,7 +124,7 @@ export function TvCompetitionPage() {
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">Dados demonstrativos · integração Saipos em preparação</span>
+          <span className="text-right">{error || 'Dados Saipos · atualização automática'}</span>
         </footer>
       </div>
     </main>
@@ -111,7 +132,7 @@ export function TvCompetitionPage() {
 }
 
 function RankingCard({ title, subtitle, icon, units, type }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type: 'sales' | 'kitchen' }) {
-  const maxSales = Math.max(...units.map((unit) => unit.sales))
+  const maxSales = Math.max(1, ...units.map((unit) => unit.sales))
   return (
     <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
       <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
@@ -120,8 +141,9 @@ function RankingCard({ title, subtitle, icon, units, type }: { title: string; su
       </div>
       <ol className="mt-2 divide-y divide-white/8">
         {units.map((unit, index) => {
-          const value = type === 'sales' ? money.format(unit.sales) : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
-          const width = type === 'sales' ? (unit.sales / maxSales) * 100 : (units[0].kitchenMinutes / unit.kitchenMinutes) * 100
+          const value = type === 'sales' ? money.format(unit.sales) : unit.kitchenMinutes === null ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
+          const fastest = units.find((item) => item.kitchenMinutes !== null)?.kitchenMinutes ?? 0
+          const width = type === 'sales' ? (unit.sales / maxSales) * 100 : unit.kitchenMinutes ? (fastest / unit.kitchenMinutes) * 100 : 0
           return <li key={unit.name} className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 py-3 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-3">
             <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${index === 0 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/8 text-white/65'}`}>{index + 1}</span>
             <div className="min-w-0"><div className="flex justify-between gap-2"><p className="truncate text-sm font-bold sm:text-base">{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? `${unit.orders} pedidos` : 'preparo'}</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>

@@ -2,6 +2,12 @@
   "functions": {
     "api/dirceu.js": {
       "maxDuration": 300
+    },
+    "api/saipos.js": {
+      "maxDuration": 300
+    },
+    "api/competition.js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]

@@ -13,7 +13,7 @@ function paramName(prefix: string, name: string) {
   return prefix ? `${prefix}_${name}` : name
 }
 
-export function useDirceuReport(paramPrefix = '') {
+export function useDirceuReport(paramPrefix = '', unit = 'dirceu') {
   const dayKey = paramName(paramPrefix, DAY)
   const categoryKey = paramName(paramPrefix, CATEGORY)
   const periodKey = paramName(paramPrefix, PERIOD)
@@ -107,7 +107,7 @@ export function useDirceuReport(paramPrefix = '') {
         let sawReport = false
         try {
           const refresh = fresh ? '&atualiza=1' : ''
-          const response = await fetch(`/api/dirceu?dia=${day}&categoria=${selected}&periodo=${period}${refresh}`, {
+          const response = await fetch(`/api/saipos?unidade=${unit}&dia=${day}&categoria=${selected}&periodo=${period}${refresh}`, {
             signal: controller.signal,
           })
           if (!response.ok || !response.body) {
@@ -165,7 +165,7 @@ export function useDirceuReport(paramPrefix = '') {
       cancelled = true
       controller.abort()
     }
-  }, [day, period, category, reloadKey])
+  }, [day, period, category, reloadKey, unit])
 
   useEffect(() => {
     if (!category || period !== 'dia') return
