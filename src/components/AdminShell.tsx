@@ -64,6 +64,7 @@ const RH_GROUPS: NavGroup[] = [
     title: 'Pessoas',
     items: [
       { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/colaboradores', label: 'Colaboradores', icon: Users },
       { to: '/admin/pessoas?area=rh', label: 'RH · Treinamentos', icon: GraduationCap },
       { to: '/admin/pessoas?area=dp', label: 'DP · Documentos', icon: KeyRound },
     ],

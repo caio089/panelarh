@@ -9,6 +9,7 @@ import {
   FileClock,
   FileText,
   GraduationCap,
+  HeartHandshake,
   HeartPulse,
   ShieldCheck,
 } from 'lucide-react'
@@ -81,7 +82,7 @@ function Overview({ overview }: { overview: PeopleOpsOverview | null }) {
       <section className="relative overflow-hidden rounded-[26px] border border-[#FFB39F]/50 bg-gradient-to-br from-[#F06B4E] via-[var(--pv-terracotta)] to-[#B83E2C] p-5 shadow-[0_18px_38px_rgba(225,91,63,0.28)] sm:p-6">
         <div className="pointer-events-none absolute -right-12 -top-16 h-52 w-52 rounded-full bg-[#FFD8BA]/30 blur-2xl" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
-          <div><p className="text-[11px] font-extrabold uppercase tracking-[1.5px] text-white/75">Mesa de trabalho</p><h2 className="mt-1 font-display text-2xl text-white">Tudo que o RH precisa, sem misturar com candidatos.</h2><p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/85">Candidatos ficam em Recrutamento. Colaboradores terão um cadastro operacional próprio, separado, quando essa etapa for iniciada.</p></div>
+          <div><p className="text-[11px] font-extrabold uppercase tracking-[1.5px] text-white/75">Mesa de trabalho</p><h2 className="mt-1 font-display text-2xl text-white">Tudo que o RH precisa, sem misturar com candidatos.</h2><p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/85">Candidatos ficam em Recrutamento. Colaboradores têm cadastro operacional, por unidade, em uma área própria.</p></div>
           <span className="rounded-xl bg-white/15 px-3 py-2 text-xs font-bold text-white ring-1 ring-white/25">RH + DP</span>
         </div>
       </section>
@@ -98,6 +99,14 @@ function Overview({ overview }: { overview: PeopleOpsOverview | null }) {
       )}
 
       <section className="grid gap-4 lg:grid-cols-2">
+        <AreaCard
+          eyebrow="Cadastro operacional"
+          title="Colaboradores da rede"
+          description="Cadastre as pessoas já contratadas por unidade e registre o histórico funcional de cada uma."
+          to="/admin/colaboradores"
+          items={['Cadastro por unidade e cargo', 'Ocorrências, SID e documentos', 'Histórico individual consultável']}
+          icon={<HeartHandshake size={23} />}
+        />
         <AreaCard
           eyebrow="RH"
           title="Atrair, desenvolver e cuidar do time"

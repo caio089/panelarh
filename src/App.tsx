@@ -22,6 +22,7 @@ import { UnitScheduleTab } from '@/pages/unit/UnitScheduleTab'
 import { GestaoStoreProvider } from '@/features/gestao/GestaoStoreProvider'
 import { TvCompetitionPage } from '@/pages/TvCompetitionPage'
 import { PeopleOpsPage } from '@/pages/PeopleOpsPage'
+import { CollaboratorsPage } from '@/pages/CollaboratorsPage'
 
 export default function App() {
   return (
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="gerentes" element={<ManagersPage />} />
                 <Route path="rh" element={<AdminDashboardPage />} />
                 <Route path="pessoas" element={<PeopleOpsPage />} />
+                <Route path="colaboradores" element={<CollaboratorsPage />} />
                 <Route path="quadro" element={<AdminBoardPage />} />
                 <Route path="unidades" element={<AdminUnitsPage />} />
                 <Route path="vagas" element={<AdminVagasListPage />} />
