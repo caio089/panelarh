@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 let database: SupabaseClient | null | undefined
+const RH_SESSION_KEY = 'panela-rh-session'
 
 function client() {
   if (database !== undefined) return database
@@ -24,15 +25,25 @@ function readable(error: { message?: string } | null, fallback: string) {
 }
 
 /** true = senha certa, false = senha errada, null = banco indisponível. */
-export async function verifyRhLogin(email: string, password: string): Promise<boolean | null> {
+export async function startRhSession(email: string, password: string): Promise<string | null> {
   const supabase = client()
   if (!supabase) return null
-  const { data, error } = await supabase.rpc('rh_sign_in', {
+  const { data, error } = await supabase.rpc('rh_start_session', {
     p_email: email.trim(),
     p_password: password,
   })
   if (error) return null
-  return data === true
+  if (typeof data !== 'string' || data.length !== 64) return null
+  window.localStorage.setItem(RH_SESSION_KEY, data)
+  return data
+}
+
+export function rhSessionToken() {
+  return window.localStorage.getItem(RH_SESSION_KEY) || ''
+}
+
+export function clearRhSession() {
+  window.localStorage.removeItem(RH_SESSION_KEY)
 }
 
 export async function changeRhAccess(currentPassword: string, email: string, password: string) {

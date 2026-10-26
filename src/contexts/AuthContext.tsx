@@ -18,7 +18,7 @@ import {
   syncStaffCookie,
   type DemoUser,
 } from '@/lib/demo/auth'
-import { verifyRhLogin } from '@/lib/rhAccess'
+import { clearRhSession, startRhSession } from '@/lib/rhAccess'
 
 interface AuthContextValue {
   user: DemoUser | null
@@ -51,16 +51,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return {}
     }
 
-    const remote = await verifyRhLogin(email, password)
-    if (remote === true) {
+    const remoteSession = await startRhSession(email, password)
+    if (remoteSession) {
       rememberRhEmail(email)
       setRhEmail(email.trim().toLowerCase())
       startDemoSession('demo-rh')
       setSessionId('demo-rh')
       return {}
     }
-    if (remote === false) return { error: 'E-mail ou senha inválidos.' }
-
     const fallback = findDemoAccount(email, password)
     if (fallback?.profile.role !== 'rh') return { error: 'E-mail ou senha inválidos.' }
     rememberRhEmail(fallback.user.email)
@@ -76,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signOut = useCallback(async () => {
+    clearRhSession()
     endDemoSession()
     setSessionId(null)
   }, [])

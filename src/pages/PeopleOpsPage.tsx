@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowRight,
   BadgeCheck,
@@ -17,6 +18,7 @@ import { PageHeader } from '@/components/ui'
 import { useData } from '@/contexts/DataContext'
 import { useGestaoStore } from '@/features/gestao/GestaoStoreContext'
 import { cn } from '@/lib/utils'
+import { loadPeopleOpsOverview, type PeopleOpsOverview } from '@/lib/peopleOpsDb'
 
 type Area = 'visao' | 'rh' | 'dp' | 'cadastro'
 
@@ -38,6 +40,11 @@ export function PeopleOpsPage() {
   const requestedArea = searchParams.get('area') as Area | null
   const area = AREAS.some((item) => item.id === requestedArea) ? requestedArea! : 'visao'
   const activeTeam = colaboradores.filter((person) => person.status === 'ativo')
+  const [overview, setOverview] = useState<PeopleOpsOverview | null>(null)
+
+  useEffect(() => {
+    void loadPeopleOpsOverview().then(setOverview)
+  }, [])
 
   function selectArea(next: Area) {
     setSearchParams(next === 'visao' ? {} : { area: next })
@@ -69,7 +76,7 @@ export function PeopleOpsPage() {
         ))}
       </nav>
 
-      {area === 'visao' ? <Overview activeTeam={activeTeam.length} unitCount={store.units.length} /> : null}
+      {area === 'visao' ? <Overview activeTeam={activeTeam.length} unitCount={store.units.length} overview={overview} /> : null}
       {area === 'rh' ? <RhArea /> : null}
       {area === 'dp' ? <DpArea /> : null}
       {area === 'cadastro' ? <CollaboratorsArea /> : null}
@@ -77,7 +84,7 @@ export function PeopleOpsPage() {
   )
 }
 
-function Overview({ activeTeam, unitCount }: { activeTeam: number; unitCount: number }) {
+function Overview({ activeTeam, unitCount, overview }: { activeTeam: number; unitCount: number; overview: PeopleOpsOverview | null }) {
   return (
     <div className="mt-6 space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -85,6 +92,17 @@ function Overview({ activeTeam, unitCount }: { activeTeam: number; unitCount: nu
         <Metric icon={<Building2 size={19} />} label="Unidades acompanhadas" value={unitCount} hint="Visão da rede inteira" />
         <Metric icon={<ShieldCheck size={19} />} label="Prontidão documental" value="—" hint="Será alimentada pelo DP" />
       </div>
+
+      {overview ? (
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric icon={<GraduationCap size={18} />} label="Treinamentos pendentes" value={overview.treinamentos_pendentes} hint="Dados reais do RH" />
+          <Metric icon={<FileText size={18} />} label="Documentos pendentes" value={overview.documentos_pendentes} hint="Dados reais do DP" />
+          <Metric icon={<HeartPulse size={18} />} label="Atestados em aberto" value={overview.atestados_abertos} hint="Acompanhamento ativo" />
+          <Metric icon={<FileClock size={18} />} label="SID em acompanhamento" value={overview.sid_abertos} hint="Histórico funcional" />
+        </section>
+      ) : (
+        <p className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-[var(--pv-cream)]/75">Entre novamente na conta de RH para carregar os indicadores protegidos de DP.</p>
+      )}
 
       <section className="grid gap-4 lg:grid-cols-2">
         <AreaCard
