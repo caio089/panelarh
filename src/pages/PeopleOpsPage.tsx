@@ -5,28 +5,23 @@ import {
   ArrowRight,
   BadgeCheck,
   BriefcaseBusiness,
-  Building2,
   ClipboardCheck,
   FileClock,
   FileText,
   GraduationCap,
   HeartPulse,
   ShieldCheck,
-  UsersRound,
 } from 'lucide-react'
 import { PageHeader } from '@/components/ui'
-import { useData } from '@/contexts/DataContext'
-import { useGestaoStore } from '@/features/gestao/GestaoStoreContext'
 import { cn } from '@/lib/utils'
 import { loadPeopleOpsOverview, type PeopleOpsOverview } from '@/lib/peopleOpsDb'
 
-type Area = 'visao' | 'rh' | 'dp' | 'cadastro'
+type Area = 'visao' | 'rh' | 'dp'
 
 const AREAS: Array<{ id: Area; label: string }> = [
   { id: 'visao', label: 'Visão geral' },
   { id: 'rh', label: 'RH' },
   { id: 'dp', label: 'Departamento Pessoal' },
-  { id: 'cadastro', label: 'Colaboradores' },
 ]
 
 /**
@@ -34,12 +29,9 @@ const AREAS: Array<{ id: Area; label: string }> = [
  * de pessoas das rotinas documentais/DP e mantém a entrada por unidade.
  */
 export function PeopleOpsPage() {
-  const { store } = useData()
-  const { colaboradores } = useGestaoStore()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedArea = searchParams.get('area') as Area | null
   const area = AREAS.some((item) => item.id === requestedArea) ? requestedArea! : 'visao'
-  const activeTeam = colaboradores.filter((person) => person.status === 'ativo')
   const [overview, setOverview] = useState<PeopleOpsOverview | null>(null)
 
   useEffect(() => {
@@ -76,22 +68,23 @@ export function PeopleOpsPage() {
         ))}
       </nav>
 
-      {area === 'visao' ? <Overview activeTeam={activeTeam.length} unitCount={store.units.length} overview={overview} /> : null}
+      {area === 'visao' ? <Overview overview={overview} /> : null}
       {area === 'rh' ? <RhArea /> : null}
       {area === 'dp' ? <DpArea /> : null}
-      {area === 'cadastro' ? <CollaboratorsArea /> : null}
     </div>
   )
 }
 
-function Overview({ activeTeam, unitCount, overview }: { activeTeam: number; unitCount: number; overview: PeopleOpsOverview | null }) {
+function Overview({ overview }: { overview: PeopleOpsOverview | null }) {
   return (
     <div className="mt-6 space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <Metric icon={<UsersRound size={19} />} label="Colaboradores ativos" value={activeTeam} hint="Cadastro por unidade" />
-        <Metric icon={<Building2 size={19} />} label="Unidades acompanhadas" value={unitCount} hint="Visão da rede inteira" />
-        <Metric icon={<ShieldCheck size={19} />} label="Prontidão documental" value="—" hint="Será alimentada pelo DP" />
-      </div>
+      <section className="relative overflow-hidden rounded-[26px] border border-[#FFB39F]/50 bg-gradient-to-br from-[#F06B4E] via-[var(--pv-terracotta)] to-[#B83E2C] p-5 shadow-[0_18px_38px_rgba(225,91,63,0.28)] sm:p-6">
+        <div className="pointer-events-none absolute -right-12 -top-16 h-52 w-52 rounded-full bg-[#FFD8BA]/30 blur-2xl" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div><p className="text-[11px] font-extrabold uppercase tracking-[1.5px] text-white/75">Mesa de trabalho</p><h2 className="mt-1 font-display text-2xl text-white">Tudo que o RH precisa, sem misturar com candidatos.</h2><p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/85">Candidatos ficam em Recrutamento. Colaboradores terão um cadastro operacional próprio, separado, quando essa etapa for iniciada.</p></div>
+          <span className="rounded-xl bg-white/15 px-3 py-2 text-xs font-bold text-white ring-1 ring-white/25">RH + DP</span>
+        </div>
+      </section>
 
       {overview ? (
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -110,7 +103,7 @@ function Overview({ activeTeam, unitCount, overview }: { activeTeam: number; uni
           title="Atrair, desenvolver e cuidar do time"
           description="Vagas, recrutamento, treinamentos e capacitações da rede."
           to="?area=rh"
-          items={['Vagas e pipeline de seleção', 'Treinamentos e capacitações', 'Acompanhamento por unidade']}
+          items={['Vagas e pipeline de seleção', 'Treinamentos e capacitações', 'Banco de talentos separado']}
           icon={<GraduationCap size={23} />}
         />
         <AreaCard
@@ -127,9 +120,9 @@ function Overview({ activeTeam, unitCount, overview }: { activeTeam: number; uni
       <section className="rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl sm:p-6">
         <p className="text-[11px] font-bold uppercase tracking-[1.3px] text-[var(--pv-muted)]">Como a operação fica organizada</p>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <FlowStep number="1" title="Unidade" text="A unidade mantém seu quadro de colaboradores atualizado." />
-          <FlowStep number="2" title="RH" text="A pessoa de RH conduz vagas, seleção, treinamento e capacitação." />
-          <FlowStep number="3" title="DP" text="O DP controla documentos e ocorrências funcionais com acesso restrito." />
+          <FlowStep number="1" title="Candidatos" text="Entram por vagas, pipeline e seleção. Não são colaboradores." />
+          <FlowStep number="2" title="RH" text="Conduz recrutamento, treinamento e capacitação." />
+          <FlowStep number="3" title="DP" text="Controla documentos e ocorrências do colaborador já cadastrado." />
         </div>
       </section>
     </div>
@@ -155,8 +148,8 @@ function RhArea() {
         label="Desenvolvimento"
         title="Treinamentos e capacitação"
         description="Esta é a base para organizar trilhas por função e unidade: integração, segurança alimentar, atendimento, cozinha e liderança."
-        links={[{ to: '/admin/pessoas?area=cadastro', label: 'Ver colaboradores por unidade' }]}
-        note="Próxima etapa: registrar presença, certificados e vencimentos diretamente na ficha de cada colaborador."
+        links={[]}
+        note="O cadastro operacional de colaboradores será uma etapa separada. Assim, candidatos e colaboradores não se misturam."
       />
     </div>
   )
@@ -171,21 +164,21 @@ function DpArea() {
           label="Saúde ocupacional"
           title="Atestados e afastamentos"
           description="Controle datas, período de afastamento, status e retorno ao trabalho por colaborador."
-          links={[{ to: '/admin/pessoas?area=cadastro', label: 'Abrir cadastro de colaboradores' }]}
+          links={[]}
         />
         <ModuleCard
           icon={<FileClock size={20} />}
           label="Histórico funcional"
           title="SID e ocorrências"
           description="Registre o SID e mantenha o histórico funcional consultável pela responsável do RH."
-          links={[{ to: '/admin/pessoas?area=cadastro', label: 'Consultar por unidade' }]}
+          links={[]}
         />
         <ModuleCard
           icon={<FileText size={20} />}
           label="Documentos"
           title="Holerites e exames"
           description="Central para holerites, exame admissional, periódicos, ASO, contratos e demais documentos."
-          links={[{ to: '/admin/pessoas?area=cadastro', label: 'Selecionar colaborador' }]}
+          links={[]}
         />
       </div>
 
@@ -201,47 +194,6 @@ function DpArea() {
   )
 }
 
-function CollaboratorsArea() {
-  const { store } = useData()
-  const { colaboradores } = useGestaoStore()
-  return (
-    <div className="mt-6 space-y-4">
-      <section className="rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl sm:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[1.3px] text-[var(--pv-muted)]">Cadastro base</p>
-            <h2 className="mt-1 font-display text-2xl text-[var(--pv-ink)]">Colaboradores por unidade</h2>
-            <p className="mt-1 text-sm text-[var(--pv-muted)]">Use o cadastro da unidade como a ficha principal de cada pessoa.</p>
-          </div>
-        </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          {store.units.map((unit) => {
-            const people = colaboradores.filter((item) => item.unitId === unit.id)
-            const active = people.filter((item) => item.status === 'ativo').length
-            return (
-              <Link
-                key={unit.id}
-                to={`/admin/unidade/${unit.id}/colaboradores`}
-                className="group rounded-xl border border-[var(--pv-line)] bg-white p-4 transition hover:-translate-y-0.5 hover:border-[var(--pv-terracotta)]/45 hover:shadow-md"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display text-lg text-[var(--pv-ink)]">{unit.name}</p>
-                    <p className="mt-1 text-sm text-[var(--pv-muted)]">{active} ativos · {people.length} no cadastro</p>
-                  </div>
-                  <ArrowRight size={17} className="mt-1 text-[var(--pv-terracotta)] transition group-hover:translate-x-0.5" />
-                </div>
-              </Link>
-            )
-          })}
-        </div>
-      </section>
-      <p className="px-1 text-xs text-[var(--pv-cream)]/65">
-        Ao cadastrar um colaborador, informe unidade, função, data de admissão e status. A ficha será a referência para RH e DP.
-      </p>
-    </div>
-  )
-}
 
 function Metric({ icon, label, value, hint }: { icon: ReactNode; label: string; value: string | number; hint: string }) {
   return (
