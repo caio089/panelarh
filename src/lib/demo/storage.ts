@@ -1,5 +1,5 @@
 import type { AppStore } from '@/lib/data'
-import { buildDemoStore, withDirceuTestVagas, withHouseUnits } from '@/lib/demo/seedData'
+import { buildDemoStore, withHouseUnits } from '@/lib/demo/seedData'
 
 /** Versione a chave ao mudar o formato do seed para descartar dados antigos do navegador. */
 const STORE_KEY = 'panela-demo-store-v3'
@@ -21,13 +21,12 @@ export function loadDemoStore(): AppStore {
       const parsed: unknown = JSON.parse(raw)
       if (isAppStore(parsed)) {
         const units = withHouseUnits(parsed.units)
-        const vagas = withDirceuTestVagas(parsed.vagas)
         const candidatos = parsed.candidatos.map((candidato) =>
           candidato.status === 'reprovada' ? { ...candidato, status: 'banco' as const } : candidato,
         )
         const movedToBank = candidatos.some((candidato, index) => candidato !== parsed.candidatos[index])
-        if (units.length !== parsed.units.length || vagas.length !== parsed.vagas.length || movedToBank) {
-          const next = { ...parsed, units, vagas, candidatos }
+        if (units.length !== parsed.units.length || movedToBank) {
+          const next = { ...parsed, units, candidatos }
           saveDemoStore(next)
           return next
         }

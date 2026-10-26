@@ -8,6 +8,9 @@
     },
     "api/competition.js": {
       "maxDuration": 300
+    },
+    "api/selecao.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]

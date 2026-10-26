@@ -5,7 +5,7 @@ import { PublicHeader, PublicFooter, EmptyState } from '@/components/Layout'
 import { Button } from '@/components/ui'
 
 export function CareersPage() {
-  const { store } = useData()
+  const { store, vagasError } = useData()
   const vagas = store.vagas.filter((v) => v.ativa)
 
   return (
@@ -21,9 +21,9 @@ export function CareersPage() {
         <div className="relative mx-auto max-w-6xl px-5 pb-14 pt-16 sm:pt-20">
           <div className="animate-fade-up max-w-3xl">
             <img
-              src="/logo-panela-velha.png"
+              src="/logo-panela-horizontal.png"
               alt="Panela Velha"
-              className="mb-6 h-20 w-auto object-contain sm:h-24"
+              className="mb-6 h-16 w-auto object-contain sm:h-20"
             />
             <p className="pv-eyebrow">Carreiras</p>
             <h1 className="mt-3 font-display text-[2.5rem] leading-[1.08] text-[#F7F4EC] sm:text-5xl lg:text-[58px]">
@@ -57,6 +57,8 @@ export function CareersPage() {
             </p>
           </div>
         </div>
+
+        {vagasError ? <p className="mb-4 text-sm text-[var(--pv-cream)]/80">{vagasError}</p> : null}
 
         {vagas.length === 0 ? (
           <EmptyState

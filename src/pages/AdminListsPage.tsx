@@ -45,7 +45,7 @@ const emptyForm = (unitId = ''): VagaForm => ({
 
 export function AdminVagasListPage() {
   const { isAdmin, isRh, profile } = useAuth()
-  const { store, addVaga, updateVaga, deleteVaga } = useData()
+  const { store, vagasError, addVaga, updateVaga, deleteVaga } = useData()
 
   const unitIds = isAdmin || isRh
     ? store.units.map((u) => u.id)
@@ -105,7 +105,7 @@ export function AdminVagasListPage() {
     setFormError('')
     try {
       if (editing) {
-        updateVaga(editing.id, {
+        await updateVaga(editing.id, {
           unit_id: form.unitId,
           titulo: form.titulo.trim(),
           descricao: form.descricao.trim(),
@@ -134,11 +134,15 @@ export function AdminVagasListPage() {
     }
   }
 
-  function removeVaga(vaga: Vaga, e?: MouseEvent) {
+  async function removeVaga(vaga: Vaga, e?: MouseEvent) {
     e?.stopPropagation()
     if (!confirm(`Excluir a vaga "${vaga.titulo}" e seus candidatos?`)) return
-    deleteVaga(vaga.id)
-    if (detail?.id === vaga.id) setDetail(null)
+    try {
+      await deleteVaga(vaga.id)
+      if (detail?.id === vaga.id) setDetail(null)
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível excluir a vaga.')
+    }
   }
 
   return (
@@ -163,6 +167,11 @@ export function AdminVagasListPage() {
           )
         }
       />
+      {vagasError ? (
+        <Alert tone="error" className="mt-4">
+          {vagasError}
+        </Alert>
+      ) : null}
 
       {vagas.length === 0 ? (
         <div className="mt-8">

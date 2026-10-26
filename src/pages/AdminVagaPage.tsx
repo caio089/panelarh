@@ -21,7 +21,7 @@ import { openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import type { Candidato, CandidateStatus, Experience, Profile } from '@/types'
 import { PIPELINE_ORDER, STATUS_META } from '@/types'
-import { Alert, Button, Field, Input, StatusPill, Textarea } from '@/components/ui'
+import { Alert, Button, Field, Input, NoticeModal, StatusPill, Textarea } from '@/components/ui'
 import { ProfileAnswers } from '@/components/ProfileAnswers'
 
 type CandFull = Omit<Candidato, 'profile'> & { profile?: Profile | null; experiences?: Experience[] }
@@ -49,6 +49,7 @@ export function AdminVagaPage() {
   const [notifyError, setNotifyError] = useState('')
   const [trainingDate, setTrainingDate] = useState('')
   const [pendingStatus, setPendingStatus] = useState<{ id: string; status: CandidateStatus } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
@@ -143,10 +144,14 @@ export function AdminVagaPage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              if (confirm(`Excluir a vaga "${vagaTitle}"?`)) {
-                deleteVaga(vagaId)
-                window.location.href = '/admin/quadro'
-              }
+              if (!confirm(`Excluir a vaga "${vagaTitle}"?`)) return
+              void deleteVaga(vagaId)
+                .then(() => {
+                  window.location.href = '/admin/quadro'
+                })
+                .catch((err: unknown) => {
+                  setNotice(err instanceof Error ? err.message : 'Não foi possível excluir a vaga.')
+                })
             }}
           >
             <Trash2 size={14} /> Excluir vaga
@@ -320,6 +325,7 @@ export function AdminVagaPage() {
           </div>
         </div>
       )}
+      <NoticeModal message={notice} onClose={() => setNotice(null)} />
     </div>
   )
 }

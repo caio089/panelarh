@@ -12,6 +12,13 @@ export function staffIdFromCookie(header) {
   }
 }
 
+const STAFF_SESSION_IDS = new Set(['demo-admin', 'demo-rh'])
+
 export function isAdminRequest(req) {
   return staffIdFromCookie(req?.headers?.cookie) === ADMIN_SESSION_ID
+}
+
+/** Admin e RH podem pedir a seleção. A Saipos continua só com o admin. */
+export function isStaffRequest(req) {
+  return STAFF_SESSION_IDS.has(staffIdFromCookie(req?.headers?.cookie))
 }

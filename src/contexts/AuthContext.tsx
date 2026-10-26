@@ -12,10 +12,13 @@ import {
   demoAccountById,
   endDemoSession,
   findDemoAccount,
+  rememberRhEmail,
+  rememberedRhEmail,
   startDemoSession,
   syncStaffCookie,
   type DemoUser,
 } from '@/lib/demo/auth'
+import { verifyRhLogin } from '@/lib/rhAccess'
 
 interface AuthContextValue {
   user: DemoUser | null
@@ -23,6 +26,7 @@ interface AuthContextValue {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error?: string }>
   signOut: () => Promise<void>
+  updateRhEmail: (email: string) => void
   isStaff: boolean
   isAdmin: boolean
   isRh: boolean
@@ -37,13 +41,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return id
   })
   const account = demoAccountById(sessionId)
+  const [rhEmail, setRhEmail] = useState(rememberedRhEmail)
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const next = findDemoAccount(email, password)
-    if (!next) return { error: 'E-mail ou senha inválidos.' }
-    startDemoSession(next.user.id)
-    setSessionId(next.user.id)
+    const admin = findDemoAccount(email, password)
+    if (admin?.profile.role === 'admin') {
+      startDemoSession(admin.user.id)
+      setSessionId(admin.user.id)
+      return {}
+    }
+
+    const remote = await verifyRhLogin(email, password)
+    if (remote === true) {
+      rememberRhEmail(email)
+      setRhEmail(email.trim().toLowerCase())
+      startDemoSession('demo-rh')
+      setSessionId('demo-rh')
+      return {}
+    }
+    if (remote === false) return { error: 'E-mail ou senha inválidos.' }
+
+    const fallback = findDemoAccount(email, password)
+    if (fallback?.profile.role !== 'rh') return { error: 'E-mail ou senha inválidos.' }
+    rememberRhEmail(fallback.user.email)
+    setRhEmail(fallback.user.email)
+    startDemoSession(fallback.user.id)
+    setSessionId(fallback.user.id)
     return {}
+  }, [])
+
+  const updateRhEmail = useCallback((email: string) => {
+    rememberRhEmail(email)
+    setRhEmail(email.trim().toLowerCase())
   }, [])
 
   const signOut = useCallback(async () => {
@@ -51,18 +80,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionId(null)
   }, [])
 
+  const isRh = account?.profile.role === 'rh'
+  const user = account
+    ? { ...account.user, email: isRh ? rhEmail : account.user.email }
+    : null
+  const profile = account ? { ...account.profile, email: user?.email ?? account.profile.email } : null
+
   const value = useMemo<AuthContextValue>(
     () => ({
-      user: account?.user ?? null,
-      profile: account?.profile ?? null,
+      user,
+      profile,
       loading: false,
       signIn,
       signOut,
+      updateRhEmail,
       isStaff: account?.profile.role === 'admin' || account?.profile.role === 'rh',
       isAdmin: account?.profile.role === 'admin',
       isRh: account?.profile.role === 'rh',
     }),
-    [account, signIn, signOut],
+    [account, user, profile, signIn, signOut, updateRhEmail],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -163,8 +163,7 @@ export function AdminDashboardPage() {
               </span>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-[#EFE3C4]">
-              A IA lê o que a vaga pede, cruza experiência, turno e quando a pessoa pode começar —
-              e ranqueia os melhores candidatos para você afinar a seleção.
+              A nota desta tela é uma prévia local. O cruzamento de verdade fica na Seleção: o Groq lê a vaga e as respostas de cada pessoa.
             </p>
           </div>
         </div>

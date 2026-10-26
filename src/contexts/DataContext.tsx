@@ -4,12 +4,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import type { CandidateStatus, Candidato, Unit, Vaga } from '@/types'
 import type { AppStore } from '@/lib/data'
 import { loadDemoStore, newId, resetDemoStore, saveDemoStore } from '@/lib/demo/storage'
+import { deleteRemoteVaga, insertVaga, listVagas, updateRemoteVaga } from '@/lib/vagasDb'
 
 type VagaEditableField =
   | 'titulo'
@@ -61,10 +63,11 @@ interface PublicApplicationInput {
 
 interface DataContextValue {
   store: AppStore
+  vagasError: string
   resetDemoData: () => void
   addVaga: (input: NewVagaInput) => Promise<string>
-  updateVaga: (vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => void
-  deleteVaga: (vagaId: string) => void
+  updateVaga: (vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => Promise<void>
+  deleteVaga: (vagaId: string) => Promise<void>
   updateCandidatoStatus: (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => void
   finishVagaSelection: (
     vagaId: string,
@@ -117,19 +120,46 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<AppStore>(() => loadDemoStore())
+  const [vagasError, setVagasError] = useState('')
+  const vagaWrite = useRef(0)
 
   useEffect(() => {
     saveDemoStore(store)
   }, [store])
 
+  const pullVagas = useCallback(async () => {
+    const seen = vagaWrite.current
+    try {
+      const vagas = await listVagas()
+      if (seen !== vagaWrite.current) return
+      setVagasError('')
+      setStore((prev) => ({ ...prev, vagas }))
+    } catch (err) {
+      if (seen !== vagaWrite.current) return
+      setVagasError(err instanceof Error ? err.message : 'Não foi possível carregar as vagas.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void pullVagas()
+    const onFocus = () => {
+      void pullVagas()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [pullVagas])
+
   // Mantém abas abertas sincronizadas (ex.: site público em uma aba, painel RH em outra).
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key?.startsWith('panela-demo-store')) setStore(loadDemoStore())
+      if (!event.key?.startsWith('panela-demo-store')) return
+      const next = loadDemoStore()
+      setStore((prev) => ({ ...next, vagas: prev.vagas }))
+      void pullVagas()
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [pullVagas])
 
   const resetDemoData = useCallback(() => {
     setStore(resetDemoStore())
@@ -139,15 +169,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!input.unitId) throw new Error('Selecione uma unidade.')
     if (!input.titulo.trim()) throw new Error('Informe o título da vaga.')
 
-    const vaga: Vaga = {
-      id: newId('vaga'),
+    vagaWrite.current += 1
+    const vaga = await insertVaga({
       unit_id: input.unitId,
       titulo: input.titulo.trim(),
       descricao: input.descricao || DEFAULT_VAGA_DESCRICAO,
       localidade: input.localidade || 'Presencial',
       tipo: input.tipo || 'Presencial',
       ativa: input.ativa ?? true,
-      criada_em: new Date().toISOString(),
       salario: input.salario || null,
       horario: input.horario || null,
       regime: input.regime || 'CLT',
@@ -155,19 +184,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
       requisitos: input.requisitos || null,
       diferenciais: input.diferenciais || null,
       beneficios: input.beneficios || null,
-    }
-    setStore((prev) => ({ ...prev, vagas: [vaga, ...prev.vagas] }))
+    })
+    vagaWrite.current += 1
+    setStore((prev) => ({ ...prev, vagas: [vaga, ...prev.vagas.filter((item) => item.id !== vaga.id)] }))
     return vaga.id
   }, [])
 
-  const updateVaga = useCallback((vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => {
+  const updateVaga = useCallback(async (vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => {
+    vagaWrite.current += 1
+    await updateRemoteVaga(vagaId, patch)
+    vagaWrite.current += 1
     setStore((prev) => ({
       ...prev,
       vagas: prev.vagas.map((v) => (v.id === vagaId ? { ...v, ...patch } : v)),
     }))
   }, [])
 
-  const deleteVaga = useCallback((vagaId: string) => {
+  const deleteVaga = useCallback(async (vagaId: string) => {
+    vagaWrite.current += 1
+    await deleteRemoteVaga(vagaId)
+    vagaWrite.current += 1
     setStore((prev) => {
       const removedCandidatoIds = new Set(prev.candidatos.filter((c) => c.vaga_id === vagaId).map((c) => c.id))
       return {
@@ -232,6 +268,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
         candidatos,
       }
     })
+    if ('chosenName' in result) {
+      vagaWrite.current += 1
+      void updateRemoteVaga(vagaId, { ativa: false }).catch(() => {
+        setVagasError('A vaga foi encerrada neste navegador, mas o site ainda não confirmou.')
+      })
+    }
     return result
   }, [])
 
@@ -350,6 +392,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       store,
+      vagasError,
       resetDemoData,
       addVaga,
       updateVaga,
@@ -367,6 +410,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }),
     [
       store,
+      vagasError,
       resetDemoData,
       addVaga,
       updateVaga,

@@ -191,12 +191,14 @@ export function Modal({
   children,
   onClose,
   wide,
+  stacked,
 }: {
   open: boolean
   title: string
   children: ReactNode
   onClose: () => void
   wide?: boolean
+  stacked?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -216,7 +218,10 @@ export function Modal({
 
   return (
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-end justify-center bg-[rgba(10,18,40,0.62)] p-0 backdrop-blur-[2px] sm:items-center sm:p-5"
+      className={cn(
+        'animate-fade-in fixed inset-0 flex items-end justify-center bg-[rgba(10,18,40,0.62)] p-0 backdrop-blur-[2px] sm:items-center sm:p-5',
+        stacked ? 'z-[60]' : 'z-50',
+      )}
       onClick={onClose}
       role="presentation"
     >
@@ -244,6 +249,25 @@ export function Modal({
         <div className="p-5">{children}</div>
       </div>
     </div>
+  )
+}
+
+export function NoticeModal({
+  message,
+  onClose,
+  title = 'Atenção',
+}: {
+  message: string | null
+  onClose: () => void
+  title?: string
+}) {
+  return (
+    <Modal open={Boolean(message)} title={title} onClose={onClose} stacked>
+      <p className="text-sm leading-relaxed text-[var(--pv-ink)]">{message}</p>
+      <div className="mt-5 flex justify-end">
+        <Button onClick={onClose}>Entendi</Button>
+      </div>
+    </Modal>
   )
 }
 

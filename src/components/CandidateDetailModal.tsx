@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
@@ -5,7 +6,7 @@ import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { formatDateBR } from '@/lib/utils'
 import { STATUS_META, type Candidato, type Experience, type Profile, type Vaga } from '@/types'
-import { Button, Modal, StatusPill } from '@/components/ui'
+import { Button, Modal, NoticeModal, StatusPill } from '@/components/ui'
 import { ProfileAnswers } from '@/components/ProfileAnswers'
 
 export type CandidateDetailData = {
@@ -31,6 +32,7 @@ export function CandidateDetailModal({
 }) {
   const { user } = useAuth()
   const { sendMessage } = useData()
+  const [notice, setNotice] = useState<string | null>(null)
 
   if (!data) return null
 
@@ -48,6 +50,7 @@ export function CandidateDetailModal({
   const hasPhone = Boolean(phone)
 
   return (
+    <>
     <Modal open={open} title={candidato.nome} onClose={onClose} wide>
       <div className="flex flex-wrap items-center gap-2">
         <StatusPill
@@ -116,7 +119,7 @@ export function CandidateDetailModal({
             onClick={() => {
               const sent = openWhatsAppChat(phone, message)
               if (sent.error) {
-                window.alert(sent.error)
+                setNotice(sent.error)
                 return
               }
               if (user) sendMessage(candidato.id, user.id, message)
@@ -134,5 +137,7 @@ export function CandidateDetailModal({
         </Button>
       </div>
     </Modal>
+    <NoticeModal message={notice} onClose={() => setNotice(null)} />
+    </>
   )
 }

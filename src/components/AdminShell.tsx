@@ -12,6 +12,9 @@ import {
   UserCog,
   Store,
   PieChart,
+  KeyRound,
+  HeartHandshake,
+  GraduationCap,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -45,7 +48,10 @@ const STATIC_GROUPS: NavGroup[] = [
   },
   {
     title: 'RH',
-    items: [{ to: '/admin/rh', label: 'RH', icon: PieChart }],
+    items: [
+      { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/rh', label: 'Painel de vagas', icon: PieChart },
+    ],
   },
   {
     title: 'Configurações',
@@ -55,14 +61,24 @@ const STATIC_GROUPS: NavGroup[] = [
 
 const RH_GROUPS: NavGroup[] = [
   {
-    title: 'RH',
+    title: 'Pessoas',
     items: [
-      { to: '/admin/rh', label: 'Painel', icon: PieChart },
+      { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/pessoas?area=rh', label: 'RH · Treinamentos', icon: GraduationCap },
+      { to: '/admin/pessoas?area=dp', label: 'DP · Documentos', icon: KeyRound },
+      { to: '/admin/pessoas?area=cadastro', label: 'Colaboradores', icon: Users },
+    ],
+  },
+  {
+    title: 'Recrutamento',
+    items: [
+      { to: '/admin/rh', label: 'Painel de vagas', icon: PieChart },
       { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
       { to: '/admin/quadro', label: 'Pipeline', icon: KanbanSquare },
       { to: '/admin/candidatos', label: 'Candidatos', icon: Users },
       { to: '/admin/candidatos?status=banco', label: 'Banco de talentos', icon: Archive },
       { to: '/admin/selecao', label: 'Seleção', icon: Sparkles },
+      { to: '/admin/acesso', label: 'Acesso', icon: KeyRound },
     ],
   },
 ]

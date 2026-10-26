@@ -79,11 +79,11 @@ export function withDirceuTestVagas(vagas: Vaga[]): Vaga[] {
   return [...missing, ...vagas]
 }
 
-/** Store inicial. As três unidades já nascem cadastradas, com vagas de teste só no Dirceu. */
+/** Store inicial. As vagas vêm do banco; o navegador não inventa uma lista própria. */
 export function buildDemoStore(): AppStore {
   return {
     units: withHouseUnits([]),
-    vagas: withDirceuTestVagas([]),
+    vagas: [],
     candidatos: [],
     profiles: [],
     experiences: [],

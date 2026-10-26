@@ -8,6 +8,7 @@ export const DEMO_RH_PASSWORD = 'rh123'
 
 const SESSION_KEY = 'panela-demo-session'
 const STAFF_COOKIE = 'panela-staff'
+const RH_EMAIL_KEY = 'panela-rh-email'
 
 export interface DemoUser {
   id: string
@@ -94,4 +95,12 @@ export function endDemoSession() {
 /** Garante o cookie da sessão já gravada, antes de qualquer consulta interna. */
 export function syncStaffCookie(userId: string | null) {
   writeStaffCookie(userId)
+}
+
+export function rememberedRhEmail() {
+  return window.localStorage.getItem(RH_EMAIL_KEY)?.trim().toLowerCase() || DEMO_RH_EMAIL
+}
+
+export function rememberRhEmail(email: string) {
+  window.localStorage.setItem(RH_EMAIL_KEY, email.trim().toLowerCase())
 }

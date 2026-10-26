@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Brain, MessageCircle, Sparkles, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { scoreCandidateForVaga, explainSelection } from '@/lib/aiSelection'
+import { requestGrokSelection } from '@/lib/grokSelection'
 import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
-import { Button, Field, Input, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
+import { Button, Field, Input, NoticeModal, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
 import { CandidateDetailModal, type CandidateDetailData } from '@/components/CandidateDetailModal'
 import { STATUS_META, type Candidato, type Profile, type Vaga } from '@/types'
 
@@ -39,6 +39,8 @@ export function AdminSelectionPage() {
   const [aiWhy, setAiWhy] = useState<{ headline: string; summary: string; picks: string[] } | null>(
     null,
   )
+  const [aiError, setAiError] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
   const [pendingChoice, setPendingChoice] = useState<Ranked | null>(null)
 
   useEffect(() => {
@@ -54,9 +56,7 @@ export function AdminSelectionPage() {
       .filter((c) => c.vaga_id === vaga.id && c.status !== 'reprovada' && c.status !== 'banco')
       .map((c) => {
         const p = store.profiles.find((x) => x.id === c.profile_id) || null
-        const exps = store.experiences.filter((e) => e.profile_id === c.profile_id).length
-        const { score, reasons } = scoreCandidateForVaga(c, vaga, p, exps)
-        return { candidato: c, profile: p, vaga, score, reasons }
+        return { candidato: c, profile: p, vaga, score: 0, reasons: [] }
       })
       .sort((a, b) => b.score - a.score)
   }, [store, vaga])
@@ -71,6 +71,7 @@ export function AdminSelectionPage() {
     setSelectedIds([])
     setRound(0)
     setAiWhy(null)
+    setAiError('')
     setPendingChoice(null)
   }
 
@@ -80,39 +81,48 @@ export function AdminSelectionPage() {
     setSelectedIds([])
     setRound(0)
     setAiWhy(null)
+    setAiError('')
     setPendingChoice(null)
   }
 
   const requestedCount = Math.max(1, Math.min(50, Number(askCount) || 3))
 
-  function runAiCut(count: number, fromList?: Ranked[]) {
+  async function runAiCut(count: number, fromList?: Ranked[]) {
     const source = fromList || allForVaga
-    if (!source.length) return
+    if (!source.length || !vaga) return
     const take = Math.min(Math.max(1, count), source.length)
     setAnalyzing(true)
-    window.setTimeout(() => {
-      const next = source.slice(0, take)
-      const leftover = source[take] || null
+    setAiError('')
+    try {
+      const result = await requestGrokSelection({
+        count: take,
+        vaga,
+        candidatos: source.map((item) => item.candidato),
+      })
+      const byId = new Map(result.ranking.map((item) => [item.id, item]))
+      const ranked = source
+        .map((item) => {
+          const grok = byId.get(item.candidato.id)
+          return grok ? { ...item, score: grok.score, reasons: grok.reasons } : item
+        })
+        .sort((a, b) => b.score - a.score)
+      const next = ranked.slice(0, take)
       setCut(next)
-      setSelectedIds(next.map((n) => n.candidato.id))
-      setRound((r) => r + 1)
-      setAiWhy(
-        explainSelection({
-          vagaTitle: source[0]?.vaga.titulo || vaga?.titulo || '',
-          requested: count,
-          poolSize: source.length,
-          selected: next.map((item) => ({
-            nome: item.candidato.nome,
-            score: item.score,
-            reasons: item.reasons,
-          })),
-          nextOut: leftover
-            ? { nome: leftover.candidato.nome, score: leftover.score, reasons: leftover.reasons }
-            : null,
-        }),
-      )
+      setSelectedIds(next.map((item) => item.candidato.id))
+      setRound((current) => current + 1)
+      setAiWhy({
+        headline: next.length === 1 ? 'Por que o Groq escolheu esta pessoa' : `Por que o Groq escolheu estas ${next.length} pessoas`,
+        summary: result.summary,
+        picks: next.map(
+          (item, index) =>
+            `${index + 1}. ${item.candidato.nome} (${item.score}%) — ${item.reasons.join('; ')}.`,
+        ),
+      })
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'O Groq não conseguiu cruzar as candidaturas.')
+    } finally {
       setAnalyzing(false)
-    }, 900)
+    }
   }
 
   function refineFromSelected(count: number) {
@@ -127,7 +137,7 @@ export function AdminSelectionPage() {
   function notifyWhatsApp(candidatoId: string, phone: string | null | undefined, body: string) {
     const sent = openWhatsAppChat(phone, body)
     if (sent.error) {
-      window.alert(sent.error)
+      setNotice(sent.error)
       return
     }
     if (user) sendMessage(candidatoId, user.id, body)
@@ -143,7 +153,7 @@ export function AdminSelectionPage() {
     const result = finishVagaSelection(pendingChoice.vaga.id, pendingChoice.candidato.id)
     setPendingChoice(null)
     if ('error' in result) {
-      window.alert(result.error)
+      setNotice(result.error)
       return
     }
     setCut(null)
@@ -176,7 +186,7 @@ export function AdminSelectionPage() {
       <PageHeader
         eyebrow="Panela AI"
         title="Seleção inteligente"
-        description="Escolha uma pessoa para a vaga aberta. Ao confirmar, a seleção acaba, a vaga fecha e os demais vão para o banco de talentos."
+        description="O Groq cruza o que a vaga pede com a experiência e as respostas de cada pessoa. Ao confirmar a escolha, a vaga fecha e os demais vão para o banco de talentos."
       />
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-br from-[#1B2A57] to-[#121D40] p-5 sm:p-6">
@@ -240,8 +250,8 @@ export function AdminSelectionPage() {
           >
             <Sparkles size={15} />
             {analyzing
-              ? 'IA analisando perfis…'
-              : `Selecionar ${requestedCount} com IA`}
+              ? 'Groq cruzando com a vaga…'
+              : `Pedir ao Groq ${requestedCount}`}
           </Button>
           {displayed.length > 1 && cut ? (
             <>
@@ -269,6 +279,7 @@ export function AdminSelectionPage() {
             </>
           ) : null}
         </div>
+        {aiError ? <p className="mt-3 text-sm text-[#F3C1B6]">{aiError}</p> : null}
         {round > 0 ? (
           <p className="mt-3 text-xs text-[#EFE3C4]/70">Rodada de seleção #{round}</p>
         ) : null}
@@ -319,7 +330,7 @@ export function AdminSelectionPage() {
           <div className="pv-stamp-spin flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-[var(--pv-cream)]">
             <Brain size={22} />
           </div>
-          <p className="font-display text-lg">Cruzando experiência, horário e requisitos…</p>
+          <p className="font-display text-lg">O Groq está cruzando cada candidatura com a vaga…</p>
         </div>
       ) : null}
 
@@ -410,8 +421,8 @@ export function AdminSelectionPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display text-xl text-[#F7F4EC]">
               {cut
-                ? `Selecionados pela IA · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`
-                : `Classificados · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`}
+                ? `Selecionados pelo Groq · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`
+                : `Candidaturas · ${displayed.length} pessoa${displayed.length === 1 ? '' : 's'}`}
             </h2>
             {winner ? (
               <span className="rounded-full bg-[#E4F3E9] px-3 py-1 text-xs font-bold text-[#2F7D4F]">
@@ -440,7 +451,7 @@ export function AdminSelectionPage() {
             </article>
           ) : vagaId && !cut ? (
             <p className="mb-4 text-sm text-[#EFE3C4]">
-              Informe quantas pessoas você quer e clique em Selecionar com IA — ela explica o corte.
+              Informe quantas pessoas você quer e peça ao Groq. Ele explica o cruzamento com a vaga.
             </p>
           ) : null}
 
@@ -473,7 +484,7 @@ export function AdminSelectionPage() {
                           #{idx + 1} {item.candidato.nome}
                         </p>
                         <span className="font-display text-lg text-[var(--pv-terracotta)]">
-                          {item.score}%
+                          {cut ? `${item.score}%` : 'Sem nota'}
                         </span>
                       </div>
                       <div className="mt-1">
@@ -484,7 +495,7 @@ export function AdminSelectionPage() {
                         />
                       </div>
                       <ul className="mt-3 space-y-1 text-xs text-[var(--pv-muted)]">
-                        {(cut ? item.reasons : item.reasons.slice(0, 2)).map((r) => (
+                        {(cut ? item.reasons : ['O Groq ainda não cruzou esta candidatura com a vaga.']).map((r) => (
                           <li key={r}>• {r}</li>
                         ))}
                       </ul>
@@ -552,6 +563,7 @@ export function AdminSelectionPage() {
         </div>
       ) : null}
 
+      <NoticeModal message={notice} onClose={() => setNotice(null)} />
       <CandidateDetailModal
         open={Boolean(detail)}
         data={detail}

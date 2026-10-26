@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { Building2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { Alert, Button, Field, Input, Modal, PageHeader } from '@/components/ui'
+import { Alert, Button, Field, Input, Modal, NoticeModal, PageHeader } from '@/components/ui'
 import { EmptyState } from '@/components/Layout'
 import type { Unit } from '@/types'
 
@@ -16,6 +16,7 @@ export function AdminUnitsPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   if (!isAdmin) return <Navigate to="/admin/rh" replace />
 
@@ -66,7 +67,7 @@ export function AdminUnitsPage() {
     try {
       await deleteUnit(unit.id)
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Não foi possível excluir a unidade.')
+      setNotice(err instanceof Error ? err.message : 'Não foi possível excluir a unidade.')
     }
   }
 
@@ -174,6 +175,7 @@ export function AdminUnitsPage() {
           </Button>
         </div>
       </Modal>
+      <NoticeModal message={notice} onClose={() => setNotice(null)} />
     </div>
   )
 }
