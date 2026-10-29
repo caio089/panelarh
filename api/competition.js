@@ -22,6 +22,7 @@ export default async function handler(req, res) {
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
   const kitchenOnly = req.query?.dados === 'cozinha'
+  const forceRefresh = req.query?.atualiza === '1'
   const metric = kitchenOnly ? 'cozinha' : 'vendas'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
@@ -31,19 +32,19 @@ export default async function handler(req, res) {
   }
   const date = requestedDate || today
   const period = requestedPeriod
-  const loadScoreboard = async (signal) => {
+  const loadScoreboard = async (signal, fresh = false) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
         if (kitchenOnly) {
           let kitchen = null
           try {
-            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal, unit: unit.name, cacheScope: unit.id })
+            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
           } catch {
             // A tela já mostra as vendas; a cozinha será atualizada na próxima tentativa.
           }
           return { id: unit.id, name: unit.name, sales: 0, orders: 0, kitchenMinutes: kitchen ? kitchenMinutes(kitchen.report) : null }
         }
-        const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal, unit: unit.name, cacheScope: unit.id })
+        const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
         return {
           id: unit.id,
           name: unit.name,
@@ -57,9 +58,24 @@ export default async function handler(req, res) {
   }
 
   const refreshScoreboard = async () => {
-    const payload = await loadScoreboard(new AbortController().signal)
+    const payload = await loadScoreboard(new AbortController().signal, true)
     await saveCompetitionCache(period, date, metric, payload)
     return payload
+  }
+
+  // A TV inicia esta consulta antes da troca visual. Diferente do fluxo normal,
+  // ela precisa esperar dados novos em vez de receber o cache atual.
+  if (forceRefresh) {
+    const controller = new AbortController()
+    req.on?.('close', () => controller.abort())
+    try {
+      const payload = await loadScoreboard(controller.signal, true)
+      await saveCompetitionCache(period, date, metric, payload)
+      res.setHeader('Cache-Control', 'no-store')
+      return res.status(200).json(payload)
+    } catch (error) {
+      return res.status(503).json({ error: error instanceof Error ? error.message : 'Não foi possível atualizar a competição.' })
+    }
   }
 
   const cached = await readCompetitionCache(period, date, metric) || await readLatestCompetitionCache(period, metric)

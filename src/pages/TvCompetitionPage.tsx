@@ -15,6 +15,7 @@ type CompetitionPeriod = 'dia' | 'mes'
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
 const REFRESH_MS = 60 * 1000
+const PREPARE_REFRESH_MS = 40 * 1000
 const AUTO_SLIDE_MS = 18 * 1000
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
@@ -126,10 +127,71 @@ export function TvCompetitionPage() {
   }, [date, period, refreshKey, unitsByPeriod.mes.length])
 
   useEffect(() => {
-    if (!automaticRefresh || period !== 'dia' || date !== currentCompetitionDay) return
-    const interval = window.setInterval(() => setRefreshKey((value) => value + 1), REFRESH_MS)
-    return () => window.clearInterval(interval)
-  }, [automaticRefresh, date, period, currentCompetitionDay])
+    if (!automaticRefresh || date !== currentCompetitionDay) return
+    let alive = true
+    let cycle = 0
+    let dueCycle = -1
+    const prepared = new Map<number, { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date }>()
+
+    const publish = (preparedCycle: number) => {
+      const next = prepared.get(preparedCycle)
+      if (!next || !alive) return
+      prepared.delete(preparedCycle)
+      if (next.sales) {
+        setUnitsByPeriod((current) => ({ ...current, dia: next.sales! }))
+        setUpdatedAt(next.fetchedAt ?? new Date())
+        setError('')
+      }
+      if (next.kitchen) {
+        setUnitsByPeriod((current) => ({
+          ...current,
+          dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: next.kitchen!.get(unit.name) ?? null })),
+        }))
+      }
+    }
+
+    const prepare = async (preparedCycle: number) => {
+      const [salesResult, kitchenResult] = await Promise.allSettled([
+        fetch(`/api/competition?dia=${date}&periodo=dia&atualiza=1`, { cache: 'no-store' }),
+        fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha&atualiza=1`, { cache: 'no-store' }),
+      ])
+      if (!alive || preparedCycle < dueCycle) return
+
+      const next: { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date } = {}
+      if (salesResult.status === 'fulfilled' && salesResult.value.ok) {
+        const payload = (await salesResult.value.json()) as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
+        if (payload.units) {
+          next.sales = payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' }))
+          next.fetchedAt = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date()
+        }
+      }
+      if (kitchenResult.status === 'fulfilled' && kitchenResult.value.ok) {
+        const payload = (await kitchenResult.value.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        if (payload.units) next.kitchen = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
+      }
+      if (!next.sales && !next.kitchen) return
+      prepared.set(preparedCycle, next)
+      if (preparedCycle === dueCycle) publish(preparedCycle)
+    }
+
+    const beginPreparation = () => { void prepare(cycle) }
+    const makeVisible = () => {
+      dueCycle = cycle
+      publish(cycle)
+      cycle += 1
+    }
+    const prepareTimer = window.setTimeout(beginPreparation, PREPARE_REFRESH_MS)
+    const publishTimer = window.setTimeout(makeVisible, REFRESH_MS)
+    const prepareInterval = window.setInterval(beginPreparation, REFRESH_MS)
+    const publishInterval = window.setInterval(makeVisible, REFRESH_MS)
+    return () => {
+      alive = false
+      window.clearTimeout(prepareTimer)
+      window.clearTimeout(publishTimer)
+      window.clearInterval(prepareInterval)
+      window.clearInterval(publishInterval)
+    }
+  }, [automaticRefresh, date, currentCompetitionDay])
 
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
