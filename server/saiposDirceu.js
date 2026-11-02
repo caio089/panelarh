@@ -809,3 +809,40 @@ export async function getSaiposReport({ date, category, token, signal, period = 
   if (!latest) throw new Error('A Saipos não devolveu dados para esta consulta.')
   return latest
 }
+
+/**
+ * Conta somente as vendas válidas de cada dia. A consulta do intervalo inteiro
+ * evita fazer uma requisição por dia quando o ranking mensal é aberto.
+ */
+export async function getSaiposDailySalesCounts({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+  if (!isIsoDate(start) || !isIsoDate(end) || start > end) throw new Error('Informe um intervalo de datas válido.')
+  if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
+
+  const spec = CATEGORIES.faturamento
+  const cacheKey = `${cacheScope}:${spec.path}:${spec.filter}:${start}:${end}:daily-counts`
+  const cached = fresh ? null : rawCache.get(cacheKey)
+  const rows = cached || []
+
+  if (!cached) {
+    for await (const page of saiposPages(
+      spec.path,
+      { p_date_column_filter: spec.filter, ...dayRange(start, end) },
+      token,
+      signal,
+      12,
+      PAGE_SIZE,
+    )) {
+      rows.push(...page.batch)
+      if (page.last) break
+    }
+    rememberRaw(cacheKey, rows)
+  }
+
+  const counts = new Map()
+  for (const row of rows) {
+    if (isCanceledSale(row)) continue
+    const day = text(row.shift_date).slice(0, 10) || text(row.created_at).slice(0, 10)
+    if (day >= start && day <= end) counts.set(day, (counts.get(day) || 0) + 1)
+  }
+  return counts
+}

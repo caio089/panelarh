@@ -1,13 +1,7 @@
-import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
+import { getSaiposDailySalesCounts, getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { SAIPOS_UNITS } from '../server/saiposUnits.js'
 import { waitUntil } from '@vercel/functions'
-import { readCompetitionCache, readLatestCompetitionCache, saveCompetitionCache } from '../server/competitionCache.js'
-
-function kitchenMinutes(report) {
-  const stages = Array.isArray(report?.stages) ? report.stages : []
-  const cooking = stages.find((stage) => String(stage.label).trim().toLowerCase() === 'cozinha')
-  return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
-}
+import { readCompetitionCache, saveCompetitionCache } from '../server/competitionCache.js'
 
 function isIsoDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
@@ -16,49 +10,79 @@ function isIsoDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
+function monthDays(start, end) {
+  const days = []
+  const cursor = new Date(`${start}T12:00:00Z`)
+  const final = new Date(`${end}T12:00:00Z`)
+  while (cursor <= final) {
+    days.push(cursor.toISOString().slice(0, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return days
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
   const today = todayInFortaleza()
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
-  const kitchenOnly = req.query?.dados === 'cozinha'
+  const dailyRanking = req.query?.modo === 'diario'
   const forceRefresh = req.query?.atualiza === '1'
-  const metric = kitchenOnly ? 'cozinha' : 'vendas'
+  const metric = dailyRanking ? 'ranking-diario' : 'vendas'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
-  if (requestedPeriod !== 'dia' && requestedPeriod !== 'mes') {
+  if (!dailyRanking && requestedPeriod !== 'dia' && requestedPeriod !== 'mes') {
     return res.status(400).json({ error: 'Informe período dia ou mes.' })
   }
-  const date = requestedDate || today
-  const period = requestedPeriod
+  const period = dailyRanking ? 'mes' : requestedPeriod
+  // A competição mensal é sempre o acumulado do mês corrente. Isso evita que
+  // um link ou cache de um mês anterior apareça como se fosse o mês atual.
+  const date = period === 'mes' ? today : requestedDate || today
   const loadScoreboard = async (signal, fresh = false) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
-        if (kitchenOnly) {
-          let kitchen = null
-          try {
-            kitchen = await getSaiposReport({ date, category: 'cozinha', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
-          } catch {
-            // A tela já mostra as vendas; a cozinha será atualizada na próxima tentativa.
-          }
-          return { id: unit.id, name: unit.name, sales: 0, orders: 0, kitchenMinutes: kitchen ? kitchenMinutes(kitchen.report) : null }
-        }
         const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
         return {
           id: unit.id,
           name: unit.name,
-          sales: sales.report.revenue,
           orders: sales.report.count,
-          kitchenMinutes: null,
         }
       }),
     )
     return { date, period, metric, fetchedAt: new Date().toISOString(), units }
   }
 
+  const loadDailyRanking = async (signal, fresh = false) => {
+    const start = `${today.slice(0, 7)}-01`
+    const dailyCounts = await Promise.all(
+      Object.values(SAIPOS_UNITS).map(async (unit) => ({
+        unit,
+        counts: await getSaiposDailySalesCounts({ start, end: today, token: unit.token(), signal, fresh, cacheScope: unit.id }),
+      })),
+    )
+    const wins = new Map(Object.values(SAIPOS_UNITS).map((unit) => [unit.id, 0]))
+    const days = monthDays(start, today).map((day) => {
+      const units = dailyCounts.map(({ unit, counts }) => ({ id: unit.id, name: unit.name, orders: counts.get(day) || 0 }))
+      const top = Math.max(...units.map((unit) => unit.orders))
+      const winners = top > 0 ? units.filter((unit) => unit.orders === top) : []
+      for (const winner of winners) wins.set(winner.id, (wins.get(winner.id) || 0) + 1)
+      return { date: day, units, winners: winners.map((unit) => unit.id) }
+    })
+    return {
+      date: today,
+      period: 'mes',
+      metric,
+      fetchedAt: new Date().toISOString(),
+      days,
+      standings: Object.values(SAIPOS_UNITS).map((unit) => ({ id: unit.id, name: unit.name, wins: wins.get(unit.id) || 0 })),
+    }
+  }
+
   const refreshScoreboard = async () => {
-    const payload = await loadScoreboard(new AbortController().signal, true)
+    const payload = dailyRanking
+      ? await loadDailyRanking(new AbortController().signal, true)
+      : await loadScoreboard(new AbortController().signal, true)
     await saveCompetitionCache(period, date, metric, payload)
     return payload
   }
@@ -69,7 +93,9 @@ export default async function handler(req, res) {
     const controller = new AbortController()
     req.on?.('close', () => controller.abort())
     try {
-      const payload = await loadScoreboard(controller.signal, true)
+      const payload = dailyRanking
+        ? await loadDailyRanking(controller.signal, true)
+        : await loadScoreboard(controller.signal, true)
       await saveCompetitionCache(period, date, metric, payload)
       res.setHeader('Cache-Control', 'no-store')
       return res.status(200).json(payload)
@@ -78,17 +104,30 @@ export default async function handler(req, res) {
     }
   }
 
-  const cached = await readCompetitionCache(period, date, metric) || await readLatestCompetitionCache(period, metric)
+  // Não use o cache "latest": ele pode pertencer a outro mês e misturar o
+  // placar atual com as vendas do mês anterior.
+  const cached = await readCompetitionCache(period, date, metric)
   if (cached) {
     waitUntil(refreshScoreboard().catch(() => undefined))
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
-    return res.status(200).json({ ...cached, date, cached: true, stale: cached.date !== date })
+    if (dailyRanking) return res.status(200).json({ ...cached, cached: true })
+    return res.status(200).json({
+      ...cached,
+      date,
+      units: Array.isArray(cached.units)
+        ? cached.units.map(({ id, name, orders }) => ({ id, name, orders }))
+        : [],
+      cached: true,
+      stale: cached.date !== date,
+    })
   }
 
   const controller = new AbortController()
   req.on?.('close', () => controller.abort())
   try {
-    const payload = await loadScoreboard(controller.signal)
+    const payload = dailyRanking
+      ? await loadDailyRanking(controller.signal)
+      : await loadScoreboard(controller.signal)
     await saveCompetitionCache(period, date, metric, payload)
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     res.status(200).json(payload)

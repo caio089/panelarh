@@ -15,17 +15,8 @@ export async function readCompetitionCache(period, date, metric) {
   }
 }
 
-export async function readLatestCompetitionCache(period, metric) {
-  try {
-    const value = await cache.get(`${metric}:${period}:latest`)
-    return value && typeof value === 'object' ? value : null
-  } catch {
-    return null
-  }
-}
-
 export async function saveCompetitionCache(period, date, metric, payload) {
-  const options = { ttl: period === 'mes' ? 60 * 60 * 12 : 60 * 60 * 36, tags: ['competition'], name: 'competition-scoreboard' }
+  const options = { ttl: metric === 'ranking-diario' ? 60 * 10 : period === 'mes' ? 60 * 60 * 12 : 60 * 60 * 36, tags: ['competition'], name: 'competition-scoreboard' }
   try {
     await Promise.all([
       cache.set(key(period, date, metric), payload, options),
