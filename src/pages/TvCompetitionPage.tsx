@@ -266,7 +266,7 @@ export function TvCompetitionPage() {
   const requestedDailyDate = params.get('rankingDia')
   const dailySelectedDate = requestedDailyDate && requestedDailyDate.startsWith(currentMonth) && dailyRanking?.days.some((day) => day.date === requestedDailyDate)
     ? requestedDailyDate
-    : dailyRanking?.days.at(-1)?.date ?? today
+    : dailyRanking?.days[dailyRanking.days.length - 1]?.date ?? today
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#071024] px-5 py-5 text-[#F9F6EC] sm:px-9 lg:px-12 lg:py-8">
