@@ -422,7 +422,7 @@ function RankingCard({ title, subtitle, icon, units, type = 'sales' }: { title: 
       </div>
       <ol className="mt-2 divide-y divide-white/8">
         {units.map((unit, index) => {
-          const value = type === 'sales' ? `${unit.orders} vendas` : unit.kitchenMinutes === null ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
+          const value = type === 'sales' ? `${unit.orders} vendas` : typeof unit.kitchenMinutes !== 'number' ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
           const width = type === 'sales' ? (unit.orders / maxOrders) * 100 : unit.kitchenMinutes ? (fastestKitchen / unit.kitchenMinutes) * 100 : 0
           const position = type === 'sales'
             ? rankingPosition(units, index, (item) => item.orders)
