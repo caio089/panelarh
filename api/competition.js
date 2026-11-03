@@ -21,14 +21,21 @@ function monthDays(start, end) {
   return days
 }
 
+function kitchenMinutes(report) {
+  const stages = Array.isArray(report?.stages) ? report.stages : []
+  const cooking = stages.find((stage) => String(stage.label).trim().toLowerCase() === 'cozinha')
+  return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
   const today = todayInFortaleza()
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
   const dailyRanking = req.query?.modo === 'diario'
+  const kitchenOnly = req.query?.dados === 'cozinha'
   const forceRefresh = req.query?.atualiza === '1'
-  const metric = dailyRanking ? 'ranking-diario' : 'vendas'
+  const metric = dailyRanking ? 'ranking-diario' : kitchenOnly ? 'cozinha' : 'vendas'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
@@ -42,6 +49,14 @@ export default async function handler(req, res) {
   const loadScoreboard = async (signal, fresh = false) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
+        if (kitchenOnly) {
+          try {
+            const kitchen = await getSaiposReport({ date, category: 'cozinha', period: 'dia', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
+            return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: kitchenMinutes(kitchen.report) }
+          } catch {
+            return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: null }
+          }
+        }
         const sales = await getSaiposReport({ date, category: 'faturamento', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
         return {
           id: unit.id,
@@ -115,7 +130,7 @@ export default async function handler(req, res) {
       ...cached,
       date,
       units: Array.isArray(cached.units)
-        ? cached.units.map(({ id, name, orders }) => ({ id, name, orders }))
+        ? cached.units.map(({ id, name, orders, kitchenMinutes: averageKitchenMinutes }) => ({ id, name, orders, kitchenMinutes: averageKitchenMinutes }))
         : [],
       cached: true,
       stale: cached.date !== date,

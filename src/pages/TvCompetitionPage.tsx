@@ -1,4 +1,4 @@
-import { CalendarDays, CalendarRange, Crown, RefreshCw, ShoppingBag, Trophy } from 'lucide-react'
+import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, ShoppingBag, Trophy, UtensilsCrossed } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
@@ -6,6 +6,7 @@ import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/featur
 type UnitScore = {
   name: string
   orders: number
+  kitchenMinutes: number | null
   accent: string
 }
 
@@ -93,8 +94,21 @@ export function TvCompetitionPage() {
         setUnitsByPeriod((current) => ({ ...current, [period]: payload.units!.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
         setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
         setError('')
+        if (period === 'dia') void loadKitchen()
       } catch (reason) {
         if (alive) setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o placar.')
+      }
+    }
+
+    async function loadKitchen() {
+      try {
+        const response = await fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha`)
+        const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        if (!response.ok || !payload.units || !alive) return
+        const kitchens = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
+        setUnitsByPeriod((current) => ({ ...current, dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })) }))
+      } catch {
+        // O placar de vendas permanece disponível se a Saipos não responder a cozinha.
       }
     }
 
@@ -127,7 +141,7 @@ export function TvCompetitionPage() {
     let alive = true
     let cycle = 0
     let dueCycle = -1
-    const prepared = new Map<number, { sales?: UnitScore[]; fetchedAt?: Date }>()
+    const prepared = new Map<number, { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date }>()
 
     const publish = (preparedCycle: number) => {
       const next = prepared.get(preparedCycle)
@@ -138,21 +152,31 @@ export function TvCompetitionPage() {
         setUpdatedAt(next.fetchedAt ?? new Date())
         setError('')
       }
+      if (next.kitchen) {
+        setUnitsByPeriod((current) => ({ ...current, dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: next.kitchen!.get(unit.name) ?? null })) }))
+      }
     }
 
     const prepare = async (preparedCycle: number) => {
-      const salesResult = await fetch(`/api/competition?dia=${date}&periodo=dia&atualiza=1`, { cache: 'no-store' })
+      const [salesResult, kitchenResult] = await Promise.allSettled([
+        fetch(`/api/competition?dia=${date}&periodo=dia&atualiza=1`, { cache: 'no-store' }),
+        fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha&atualiza=1`, { cache: 'no-store' }),
+      ])
       if (!alive || preparedCycle < dueCycle) return
 
-      const next: { sales?: UnitScore[]; fetchedAt?: Date } = {}
-      if (salesResult.ok) {
-        const payload = (await salesResult.json()) as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
+      const next: { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date } = {}
+      if (salesResult.status === 'fulfilled' && salesResult.value.ok) {
+        const payload = (await salesResult.value.json()) as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (payload.units) {
           next.sales = payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' }))
           next.fetchedAt = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date()
         }
       }
-      if (!next.sales) return
+      if (kitchenResult.status === 'fulfilled' && kitchenResult.value.ok) {
+        const payload = (await kitchenResult.value.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        if (payload.units) next.kitchen = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
+      }
+      if (!next.sales && !next.kitchen) return
       prepared.set(preparedCycle, next)
       if (preparedCycle === dueCycle) publish(preparedCycle)
     }
@@ -233,7 +257,9 @@ export function TvCompetitionPage() {
   }
 
   const salesRanking = [...units].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
+  const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
   const leader = salesRanking[0]
+  const kitchenLeader = kitchenRanking.find((unit) => unit.kitchenMinutes !== null)
   const totalOrders = units.reduce((total, unit) => total + unit.orders, 0)
   const periodLabel = period === 'mes' ? 'mês' : 'dia'
   const currentMonth = today.slice(0, 7)
@@ -307,21 +333,21 @@ export function TvCompetitionPage() {
           </article>
 
           <article className="rounded-[28px] border border-white/10 bg-white/[0.06] p-5 sm:p-7">
-            <div className="flex items-center gap-2 text-[#80C997]"><ShoppingBag size={21} /><p className="text-xs font-bold uppercase tracking-[0.18em]">Total de vendas</p></div>
+            <div className="flex items-center gap-2 text-[#80C997]">{period === 'dia' ? <UtensilsCrossed size={21} /> : <ShoppingBag size={21} />}<p className="text-xs font-bold uppercase tracking-[0.18em]">{period === 'dia' ? 'Cozinha mais rápida' : 'Total de vendas'}</p></div>
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{totalOrders} vendas</h2>
-                <p className="mt-2 text-base text-white/65">realizadas pelas 3 unidades</p>
+                <h2 className="font-display text-4xl sm:text-5xl">{period === 'dia' ? kitchenLeader?.name ?? 'Atualizando' : `${totalOrders} vendas`}</h2>
+                <p className="mt-2 text-base text-white/65">{period === 'dia' ? 'do pedido ao pronto' : 'realizadas pelas 3 unidades'}</p>
               </div>
-              <ShoppingBag className="shrink-0 text-[#80C997]" size={48} />
+              {period === 'dia' ? <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—'}<span className="text-xl">{kitchenLeader ? ' min' : ''}</span></p> : <ShoppingBag className="shrink-0 text-[#80C997]" size={48} />}
             </div>
-            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55">Quantidade acumulada até a data selecionada</div>
+            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55">{period === 'dia' ? <><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo no dia</> : 'Quantidade acumulada até a data selecionada'}</div>
           </article>
         </section>
 
         <section className="mt-5 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
           <RankingCard title={`Ranking de vendas do ${periodLabel}`} subtitle="Quantidade de vendas por unidade" icon={<Trophy size={20} />} units={salesRanking} />
-          <InformationCard units={salesRanking} />
+          {period === 'dia' ? <RankingCard title="Velocidade da cozinha" subtitle="Menos minutos, melhor posição" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" /> : <InformationCard units={salesRanking} />}
         </section>
         </>}
 
@@ -385,8 +411,9 @@ function InformationCard({ units }: { units: UnitScore[] }) {
   )
 }
 
-function RankingCard({ title, subtitle, icon, units }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[] }) {
+function RankingCard({ title, subtitle, icon, units, type = 'sales' }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type?: 'sales' | 'kitchen' }) {
   const maxOrders = Math.max(1, ...units.map((unit) => unit.orders))
+  const fastestKitchen = units.find((unit) => unit.kitchenMinutes !== null)?.kitchenMinutes ?? 0
   return (
     <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
       <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
@@ -395,12 +422,14 @@ function RankingCard({ title, subtitle, icon, units }: { title: string; subtitle
       </div>
       <ol className="mt-2 divide-y divide-white/8">
         {units.map((unit, index) => {
-          const value = `${unit.orders} vendas`
-          const width = (unit.orders / maxOrders) * 100
-          const position = rankingPosition(units, index, (item) => item.orders)
+          const value = type === 'sales' ? `${unit.orders} vendas` : unit.kitchenMinutes === null ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
+          const width = type === 'sales' ? (unit.orders / maxOrders) * 100 : unit.kitchenMinutes ? (fastestKitchen / unit.kitchenMinutes) * 100 : 0
+          const position = type === 'sales'
+            ? rankingPosition(units, index, (item) => item.orders)
+            : rankingPosition(units, index, (item) => -(item.kitchenMinutes ?? Infinity))
           return <li key={unit.name} className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 py-3 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-3">
             <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/8 text-white/65'}`}>{position}</span>
-            <div className="min-w-0"><div className="flex justify-between gap-2"><p className="truncate text-sm font-bold sm:text-base">{unit.name}</p><span className="text-xs text-white/45">{unit.orders} vendas</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
+            <div className="min-w-0"><div className="flex justify-between gap-2"><p className="truncate text-sm font-bold sm:text-base">{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? `${unit.orders} vendas` : 'preparo'}</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
             <strong className="font-display text-base text-[#F9F6EC] sm:text-lg">{value}</strong>
           </li>
         })}
