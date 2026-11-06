@@ -106,7 +106,8 @@ export default async function handler(req, res) {
   }
 
   const hasUsableScoreboard = (payload) => !kitchenOnly
-    || payload?.units?.some((unit) => typeof unit.kitchenMinutes === 'number')
+    || (payload?.units?.length === Object.keys(SAIPOS_UNITS).length
+      && payload.units.every((unit) => typeof unit.kitchenMinutes === 'number'))
 
   const requireUsableScoreboard = (payload) => {
     if (!hasUsableScoreboard(payload)) throw new Error('A Saipos não devolveu os tempos da cozinha agora.')
