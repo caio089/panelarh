@@ -105,19 +105,28 @@ export default async function handler(req, res) {
     }
   }
 
+  const hasUsableScoreboard = (payload) => !kitchenOnly
+    || payload?.units?.some((unit) => typeof unit.kitchenMinutes === 'number')
+
+  const requireUsableScoreboard = (payload) => {
+    if (!hasUsableScoreboard(payload)) throw new Error('A Saipos não devolveu os tempos da cozinha agora.')
+    return payload
+  }
+
   const refreshScoreboard = async () => {
     const payload = dailyRanking
       ? await loadDailyRanking(new AbortController().signal, true)
-      : await loadScoreboard(new AbortController().signal, true)
+      : requireUsableScoreboard(await loadScoreboard(new AbortController().signal, true))
     await saveCompetitionCache(period, date, metric, payload)
     return payload
   }
 
   const cached = await readCompetitionCache(period, date, metric)
+  const usableCached = cached && (dailyRanking || hasUsableScoreboard(cached))
 
   // Depois das 23h40, o último placar salvo vira o resultado oficial do dia.
   // Mesmo uma chamada de atualização não deve alterar esse resultado.
-  if (forceRefresh && scoreboardClosed && cached) {
+  if (forceRefresh && scoreboardClosed && usableCached) {
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     return res.status(200).json({ ...cached, cached: true, closed: true })
   }
@@ -130,7 +139,7 @@ export default async function handler(req, res) {
     try {
       const payload = dailyRanking
         ? await loadDailyRanking(controller.signal, true)
-        : await loadScoreboard(controller.signal, true)
+        : requireUsableScoreboard(await loadScoreboard(controller.signal, true))
       await saveCompetitionCache(period, date, metric, payload)
       res.setHeader('Cache-Control', 'no-store')
       return res.status(200).json(payload)
@@ -141,7 +150,7 @@ export default async function handler(req, res) {
 
   // Não use o cache "latest": ele pode pertencer a outro mês e misturar o
   // placar atual com as vendas do mês anterior.
-  if (cached) {
+  if (usableCached) {
     if (!scoreboardClosed) waitUntil(refreshScoreboard().catch(() => undefined))
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     if (dailyRanking) return res.status(200).json({ ...cached, cached: true })
@@ -162,7 +171,7 @@ export default async function handler(req, res) {
   try {
     const payload = dailyRanking
       ? await loadDailyRanking(controller.signal)
-      : await loadScoreboard(controller.signal)
+      : requireUsableScoreboard(await loadScoreboard(controller.signal))
     await saveCompetitionCache(period, date, metric, payload)
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     res.status(200).json(payload)
