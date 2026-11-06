@@ -11,12 +11,7 @@ type UnitScore = {
 }
 
 type CompetitionPeriod = 'dia' | 'mes'
-type CompetitionView = 'placar' | 'diario'
-
-type DailyRanking = {
-  days: Array<{ date: string; units: Array<{ id: string; name: string; orders: number }>; winners: string[] }>
-  standings: Array<{ id: string; name: string; wins: number }>
-}
+type CompetitionView = 'placar' | 'ranking'
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
 const REFRESH_MS = 60 * 1000
@@ -63,7 +58,7 @@ export function TvCompetitionPage() {
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
   const rawPeriod = params.get('periodo')
-  const view: CompetitionView = params.get('aba') === 'diario' ? 'diario' : 'placar'
+  const view: CompetitionView = params.get('aba') === 'ranking' ? 'ranking' : 'placar'
   const period: CompetitionPeriod = rawPeriod === 'mes' ? 'mes' : 'dia'
   const selectedDate = isIsoDate(rawDate) && rawDate <= today ? rawDate : currentCompetitionDay
   // O placar mensal sempre representa o mês calendário atual; somente o
@@ -74,8 +69,6 @@ export function TvCompetitionPage() {
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [automaticRefresh, setAutomaticRefresh] = useState(() => isNightServiceWindow())
-  const [dailyRanking, setDailyRanking] = useState<DailyRanking | null>(null)
-  const [dailyLoading, setDailyLoading] = useState(false)
   const monthPrefetchDate = useRef<string | null>(null)
   const units = unitsByPeriod[period]
 
@@ -101,7 +94,6 @@ export function TvCompetitionPage() {
   }, [setParams, unitsByPeriod.mes.length, view])
 
   useEffect(() => {
-    if (view !== 'placar') return
     let alive = true
     async function load() {
       try {
@@ -230,28 +222,6 @@ export function TvCompetitionPage() {
     }
   }, [automaticRefresh, date, currentCompetitionDay, view])
 
-  useEffect(() => {
-    if (view !== 'diario') return
-    const controller = new AbortController()
-    async function loadDailyRanking() {
-      setDailyLoading(true)
-      try {
-        const response = await fetch(`/api/competition?modo=diario${refreshKey ? '&atualiza=1' : ''}`, { signal: controller.signal })
-        const payload = (await response.json()) as DailyRanking & { error?: string }
-        if (!response.ok || !payload.days || !payload.standings) throw new Error(payload.error || 'Não foi possível carregar o ranking diário.')
-        setDailyRanking(payload)
-        setUpdatedAt(new Date())
-        setError('')
-      } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Não foi possível carregar o ranking diário.')
-      } finally {
-        if (!controller.signal.aborted) setDailyLoading(false)
-      }
-    }
-    void loadDailyRanking()
-    return () => controller.abort()
-  }, [view, refreshKey])
-
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
     setParams((current) => {
@@ -272,22 +242,16 @@ export function TvCompetitionPage() {
   function chooseView(next: CompetitionView) {
     setParams((current) => {
       const updated = new URLSearchParams(current)
-      if (next === 'diario') updated.set('aba', 'diario')
+      if (next === 'ranking') updated.set('aba', 'ranking')
       else updated.delete('aba')
-      return updated
-    }, { replace: true })
-  }
-
-  function chooseDailyDate(next: string) {
-    setParams((current) => {
-      const updated = new URLSearchParams(current)
-      updated.set('rankingDia', next)
       return updated
     }, { replace: true })
   }
 
   const salesRanking = [...units].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
+  const salesLeader = salesRanking[0]
+  const kitchenLeader = kitchenRanking.find((unit) => typeof unit.kitchenMinutes === 'number')
   const scores = salesRanking.map((unit) => {
     const salesIndex = salesRanking.findIndex((item) => item.name === unit.name)
     const kitchenIndex = kitchenRanking.findIndex((item) => item.name === unit.name)
@@ -310,12 +274,6 @@ export function TvCompetitionPage() {
     || currentTime.hour > DAILY_RESULT_HOUR
     || (currentTime.hour === DAILY_RESULT_HOUR && currentTime.minute >= DAILY_RESULT_MINUTE)
   const championLabel = period === 'mes' ? 'Líder do mês' : dailyResultClosed ? 'Campeã do dia' : 'Liderança parcial do dia'
-  const currentMonth = today.slice(0, 7)
-  const requestedDailyDate = params.get('rankingDia')
-  const dailySelectedDate = requestedDailyDate && requestedDailyDate.startsWith(currentMonth) && dailyRanking?.days.some((day) => day.date === requestedDailyDate)
-    ? requestedDailyDate
-    : dailyRanking?.days[dailyRanking.days.length - 1]?.date ?? today
-
   return (
     <main className="min-h-screen overflow-hidden bg-[#090E20] px-5 py-5 text-[#F9F6EC] sm:px-9 lg:px-12 lg:py-8">
       <div className="pointer-events-none fixed -left-32 top-20 h-[32rem] w-[32rem] rounded-full bg-[#3151A7]/25 blur-[140px]" />
@@ -337,32 +295,30 @@ export function TvCompetitionPage() {
         <section className="flex flex-col justify-between gap-5 py-6 lg:flex-row lg:items-end lg:py-8">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#E97A61] sm:text-sm">Desafio entre unidades</p>
-            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">{view === 'diario' ? 'Ranking diário' : `Placar do ${periodLabel}`}</h1>
-            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · {view === 'diario' ? 'Vitórias por dia no mês atual' : `Acumulado até ${date.split('-').reverse().join('/')}`}</p>
+            <h1 className="mt-2 font-display text-4xl leading-none sm:text-5xl lg:text-6xl">{view === 'ranking' ? `Ranking ${period === 'mes' ? 'mensal' : 'diário'}` : `Placar do ${periodLabel}`}</h1>
+            <p className="mt-3 text-sm text-white/60 sm:text-base">{formatDate(updatedAt)} · Acumulado até {date.split('-').reverse().join('/')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3">
             <div className="flex overflow-hidden rounded-lg border border-white/10 text-xs font-bold">
               <button type="button" onClick={() => chooseView('placar')} className={`px-3 py-2 ${view === 'placar' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Placar</button>
-              <button type="button" onClick={() => chooseView('diario')} className={`px-3 py-2 ${view === 'diario' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Ranking diário</button>
+              <button type="button" onClick={() => chooseView('ranking')} className={`px-3 py-2 ${view === 'ranking' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Ranking</button>
             </div>
-            {view === 'placar' ? <>
-              <div className="flex overflow-hidden rounded-lg border border-white/10 text-xs font-bold">
-                <button type="button" onClick={() => choosePeriod('dia')} className={`px-3 py-2 ${period === 'dia' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Dia</button>
-                <button type="button" onClick={() => choosePeriod('mes')} className={`px-3 py-2 ${period === 'mes' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>Mês</button>
-              </div>
-              {period === 'mes' ? <CalendarRange className="text-[#F4B942]" size={22} /> : <CalendarDays className="text-[#F4B942]" size={22} />}
-              <label className="text-sm text-white/70">
-                <span className="mr-2">Até</span>
-                <input type="date" value={date} max={today} disabled={period === 'mes'} onChange={(event) => chooseDate(event.target.value)} className="rounded-lg bg-white/10 px-2 py-1.5 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60 [color-scheme:dark]" />
-              </label>
-            </> : <span className="inline-flex items-center gap-2 text-sm text-white/70"><CalendarDays className="text-[#F4B942]" size={21} /> Mês atual</span>}
+            <div className="flex overflow-hidden rounded-lg border border-white/10 text-xs font-bold">
+              <button type="button" onClick={() => choosePeriod('dia')} className={`px-3 py-2 ${period === 'dia' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>{view === 'ranking' ? 'Diário' : 'Dia'}</button>
+              <button type="button" onClick={() => choosePeriod('mes')} className={`px-3 py-2 ${period === 'mes' ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/5 text-white/65'}`}>{view === 'ranking' ? 'Mensal' : 'Mês'}</button>
+            </div>
+            {period === 'mes' ? <CalendarRange className="text-[#F4B942]" size={22} /> : <CalendarDays className="text-[#F4B942]" size={22} />}
+            {period === 'dia' ? <label className="text-sm text-white/70">
+              <span className="mr-2">Dia</span>
+              <input type="date" value={date} max={today} onChange={(event) => chooseDate(event.target.value)} className="rounded-lg bg-white/10 px-2 py-1.5 text-white outline-none [color-scheme:dark]" />
+            </label> : null}
             <button type="button" aria-label="Atualizar placar" onClick={() => setRefreshKey((value) => value + 1)} className="rounded-lg bg-white/10 p-2 text-[#EFE3C4] hover:bg-white/15">
               <RefreshCw size={17} />
             </button>
           </div>
         </section>
 
-        {view === 'diario' ? <DailyRankingPanel ranking={dailyRanking} selectedDate={dailySelectedDate} loading={dailyLoading} onSelectDate={chooseDailyDate} /> : <>
+        {view === 'ranking' ? <CompetitionRankingPanel scores={scores} salesRanking={salesRanking} kitchenRanking={kitchenRanking} periodLabel={periodLabel} /> : <>
         <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
           <article className="relative overflow-hidden rounded-[28px] border border-[#F4B942]/35 bg-gradient-to-br from-[#303060] via-[#182658] to-[#101a3a] p-5 shadow-2xl sm:p-7">
             <Crown className="absolute -right-4 -top-3 text-[#F4B942]/15" size={190} strokeWidth={1} />
@@ -391,59 +347,55 @@ export function TvCompetitionPage() {
         </section>
 
         <section className="mt-5 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
-          <RankingCard title={`Mais vendas do ${periodLabel}`} subtitle="1º = 3 pts · 2º = 2 pts · 3º = 0 pt" icon={<Trophy size={20} />} units={salesRanking} />
-          <RankingCard title={period === 'mes' ? 'Mais rápida no mês' : 'Mais rápida no dia'} subtitle="1º = 3 pts · 2º = 2 pts · 3º = 0 pt" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
+          <MetricSummaryCard title={`Mais vendas do ${periodLabel}`} name={salesLeader?.name} value={salesLeader ? `${salesLeader.orders} vendas` : undefined} icon={<Trophy size={23} />} />
+          <MetricSummaryCard title={`Mais rápida no ${periodLabel}`} name={kitchenLeader?.name} value={typeof kitchenLeader?.kitchenMinutes === 'number' ? `${kitchenLeader.kitchenMinutes.toLocaleString('pt-BR')} min` : undefined} icon={<Clock3 size={23} />} />
         </section>
         </>}
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
-          <span className="text-right">{error || (view === 'diario' ? 'Empate conta como vitória para as unidades empatadas' : automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática · Dia e Mês alternam a cada 1 min' : 'Dia e Mês alternam a cada 1 min')}</span>
+          <span className="text-right">{error || (view === 'ranking' ? 'Ranking mensal e diário por pontuação' : automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática · Dia e Mês alternam a cada 1 min' : 'Dia e Mês alternam a cada 1 min')}</span>
         </footer>
       </div>
     </main>
   )
 }
 
-function DailyRankingPanel({ ranking, selectedDate, loading, onSelectDate }: { ranking: DailyRanking | null; selectedDate: string; loading: boolean; onSelectDate: (date: string) => void }) {
-  const selectedDay = ranking?.days.find((day) => day.date === selectedDate)
-  const standings = [...(ranking?.standings ?? [])].sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
-  const days = [...(ranking?.days ?? [])].reverse()
-  const displayDate = selectedDate ? selectedDate.split('-').reverse().join('/') : ''
+type CompetitionScore = { name: string; salesPoints: number; kitchenPoints: number; total: number }
 
+function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodLabel }: { scores: CompetitionScore[]; salesRanking: UnitScore[]; kitchenRanking: UnitScore[]; periodLabel: string }) {
   return (
-    <section className="mt-1 grid min-h-0 flex-1 gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+    <section className="mt-1 min-h-0 flex-1">
       <article className="rounded-[28px] border border-[#F4B942]/35 bg-gradient-to-br from-[#303060] via-[#182658] to-[#101a3a] p-5 shadow-2xl sm:p-7">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]">Quem venceu mais dias</p>
-        <div className="mt-5 space-y-4">
-          {loading && !ranking ? <p className="text-white/65">Consultando as vendas do mês…</p> : standings.map((unit, index) => {
-            const position = rankingPosition(standings, index, (item) => item.wins)
-            return <div key={unit.id} className="flex items-center justify-between gap-4 border-b border-white/12 pb-4 last:border-0">
-              <div className="flex items-center gap-3"><span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-extrabold ${position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/10 text-white/70'}`}>{position}</span><p className="font-display text-2xl">{unit.name}</p></div>
-              <strong className="font-display text-2xl text-[#F4B942]">{unit.wins} {unit.wins === 1 ? 'vitória' : 'vitórias'}</strong>
-            </div>
-          })}
+        <div className="flex items-center justify-between gap-4 border-b border-white/15 pb-5">
+          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]">Classificação geral</p><h2 className="mt-1 font-display text-3xl">Ranking do {periodLabel}</h2></div>
+          <Trophy className="text-[#F4B942]" size={42} />
         </div>
+        <ol className="mt-3 divide-y divide-white/12">
+          {scores.map((unit, index) => {
+            const position = rankingPosition(scores, index, (item) => item.total)
+            return <li key={unit.name} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 py-4">
+              <span className={`flex h-9 w-9 items-center justify-center rounded-full font-extrabold ${position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/10 text-white/70'}`}>{position}</span>
+              <div><p className="font-display text-2xl">{unit.name}</p><p className="mt-1 text-xs text-white/55">{unit.salesPoints} pts em vendas · {unit.kitchenPoints} pts em rapidez</p></div>
+              <strong className="font-display text-3xl text-[#F4B942]">{unit.total} pts</strong>
+            </li>
+          })}
+        </ol>
       </article>
 
-      <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4"><div><h2 className="font-display text-xl sm:text-2xl">Vencedores por dia</h2><p className="mt-1 text-xs text-white/50">Clique em um dia para ver o placar de cada unidade.</p></div><span className="rounded-xl bg-white/8 p-2.5 text-[#EFE3C4]"><CalendarDays size={20} /></span></div>
-        <div className="mt-4 grid max-h-[24rem] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-          {days.map((day) => {
-            const winners = day.units.filter((unit) => day.winners.includes(unit.id)).map((unit) => unit.name)
-            const active = day.date === selectedDate
-            return <button key={day.date} type="button" onClick={() => onSelectDate(day.date)} className={`rounded-xl border p-3 text-left transition ${active ? 'border-[#F4B942] bg-[#F4B942]/15' : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.08]'}`}>
-              <p className="text-sm font-bold">{day.date.split('-').reverse().join('/')}</p>
-              <p className="mt-1 text-xs text-white/60">{winners.length ? `Vencedor${winners.length > 1 ? 'es' : ''}: ${winners.join(' e ')}` : 'Sem vendas registradas'}</p>
-            </button>
-          })}
-        </div>
-        <div className="mt-4 border-t border-white/10 pt-4">
-          <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#F4B942]">Placar de {displayDate}</p>
-          {selectedDay ? <div className="mt-3 grid gap-2 sm:grid-cols-3">{[...selectedDay.units].sort((a, b) => b.orders - a.orders).map((unit) => <div key={unit.id} className="rounded-xl bg-white/[0.06] p-3"><p className="font-bold">{unit.name}</p><p className="mt-1 font-display text-xl">{unit.orders} vendas</p></div>)}</div> : <p className="mt-3 text-sm text-white/55">Nenhum dia disponível ainda.</p>}
-        </div>
-      </article>
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Quantidade por unidade" icon={<Trophy size={20} />} units={salesRanking} />
+        <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Tempo médio de preparo" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
+      </div>
     </section>
+  )
+}
+
+function MetricSummaryCard({ title, name, value, icon }: { title: string; name?: string; value?: string; icon: ReactNode }) {
+  return (
+    <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-5 shadow-xl backdrop-blur sm:p-6">
+      <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.17em] text-white/50">{title}</p><h2 className="mt-3 font-display text-4xl">{name ?? 'Atualizando'}</h2><p className="mt-2 text-lg text-[#F4B942]">{value ?? '—'}</p></div><span className="rounded-2xl bg-white/8 p-4 text-[#EFE3C4]">{icon}</span></div>
+    </article>
   )
 }
 
