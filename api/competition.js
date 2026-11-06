@@ -51,7 +51,7 @@ export default async function handler(req, res) {
       Object.values(SAIPOS_UNITS).map(async (unit) => {
         if (kitchenOnly) {
           try {
-            const kitchen = await getSaiposReport({ date, category: 'cozinha', period: 'dia', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
+            const kitchen = await getSaiposReport({ date, category: 'cozinha', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
             return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: kitchenMinutes(kitchen.report) }
           } catch {
             return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: null }

@@ -1,4 +1,4 @@
-import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, ShoppingBag, Trophy, UtensilsCrossed } from 'lucide-react'
+import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
@@ -91,10 +91,10 @@ export function TvCompetitionPage() {
         const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
         if (!alive) return
-        setUnitsByPeriod((current) => ({ ...current, [period]: payload.units!.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
+        setUnitsByPeriod((current) => ({ ...current, [period]: payload.units!.map((unit) => ({ ...unit, kitchenMinutes: unit.kitchenMinutes ?? null, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
         setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
         setError('')
-        if (period === 'dia') void loadKitchen()
+        void loadKitchen()
       } catch (reason) {
         if (alive) setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o placar.')
       }
@@ -102,11 +102,11 @@ export function TvCompetitionPage() {
 
     async function loadKitchen() {
       try {
-        const response = await fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha`)
+        const response = await fetch(`/api/competition?dia=${date}&periodo=${period}&dados=cozinha`)
         const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
         if (!response.ok || !payload.units || !alive) return
         const kitchens = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
-        setUnitsByPeriod((current) => ({ ...current, dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })) }))
+        setUnitsByPeriod((current) => ({ ...current, [period]: current[period].map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })) }))
       } catch {
         // O placar de vendas permanece disponível se a Saipos não responder a cozinha.
       }
@@ -124,10 +124,22 @@ export function TvCompetitionPage() {
     let alive = true
     async function prefetchMonth() {
       try {
-        const response = await fetch(`/api/competition?dia=${date}&periodo=mes`)
-        const payload = (await response.json()) as { units?: Omit<UnitScore, 'accent'>[] }
-        if (!response.ok || !payload.units || !alive) return
-        setUnitsByPeriod((current) => ({ ...current, mes: payload.units!.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
+        const [salesResponse, kitchenResponse] = await Promise.all([
+          fetch(`/api/competition?dia=${date}&periodo=mes`),
+          fetch(`/api/competition?dia=${date}&periodo=mes&dados=cozinha`),
+        ])
+        const salesPayload = (await salesResponse.json()) as { units?: Omit<UnitScore, 'accent'>[] }
+        const kitchenPayload = kitchenResponse.ok ? await kitchenResponse.json() as { units?: Omit<UnitScore, 'accent'>[] } : null
+        if (!salesResponse.ok || !salesPayload.units || !alive) return
+        const kitchens = new Map(kitchenPayload?.units?.map((unit) => [unit.name, unit.kitchenMinutes]) ?? [])
+        setUnitsByPeriod((current) => ({
+          ...current,
+          mes: salesPayload.units!.map((unit) => ({
+            ...unit,
+            kitchenMinutes: kitchens.get(unit.name) ?? null,
+            accent: ACCENTS[unit.name] ?? '#EFE3C4',
+          })),
+        }))
       } catch {
         monthPrefetchDate.current = null
       }
@@ -168,7 +180,7 @@ export function TvCompetitionPage() {
       if (salesResult.status === 'fulfilled' && salesResult.value.ok) {
         const payload = (await salesResult.value.json()) as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
         if (payload.units) {
-          next.sales = payload.units.map((unit) => ({ ...unit, accent: ACCENTS[unit.name] ?? '#EFE3C4' }))
+          next.sales = payload.units.map((unit) => ({ ...unit, kitchenMinutes: unit.kitchenMinutes ?? null, accent: ACCENTS[unit.name] ?? '#EFE3C4' }))
           next.fetchedAt = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date()
         }
       }
@@ -259,8 +271,7 @@ export function TvCompetitionPage() {
   const salesRanking = [...units].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
   const leader = salesRanking[0]
-  const kitchenLeader = kitchenRanking.find((unit) => unit.kitchenMinutes !== null)
-  const totalOrders = units.reduce((total, unit) => total + unit.orders, 0)
+  const kitchenLeader = kitchenRanking.find((unit) => typeof unit.kitchenMinutes === 'number')
   const periodLabel = period === 'mes' ? 'mês' : 'dia'
   const currentMonth = today.slice(0, 7)
   const requestedDailyDate = params.get('rankingDia')
@@ -333,21 +344,21 @@ export function TvCompetitionPage() {
           </article>
 
           <article className="rounded-[28px] border border-white/10 bg-white/[0.06] p-5 sm:p-7">
-            <div className="flex items-center gap-2 text-[#80C997]">{period === 'dia' ? <UtensilsCrossed size={21} /> : <ShoppingBag size={21} />}<p className="text-xs font-bold uppercase tracking-[0.18em]">{period === 'dia' ? 'Cozinha mais rápida' : 'Total de vendas'}</p></div>
+            <div className="flex items-center gap-2 text-[#80C997]"><UtensilsCrossed size={21} /><p className="text-xs font-bold uppercase tracking-[0.18em]">Cozinha mais rápida</p></div>
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{period === 'dia' ? kitchenLeader?.name ?? 'Atualizando' : `${totalOrders} vendas`}</h2>
-                <p className="mt-2 text-base text-white/65">{period === 'dia' ? 'do pedido ao pronto' : 'realizadas pelas 3 unidades'}</p>
+                <h2 className="font-display text-4xl sm:text-5xl">{kitchenLeader?.name ?? 'Atualizando'}</h2>
+                <p className="mt-2 text-base text-white/65">do pedido ao pronto</p>
               </div>
-              {period === 'dia' ? <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—'}<span className="text-xl">{kitchenLeader ? ' min' : ''}</span></p> : <ShoppingBag className="shrink-0 text-[#80C997]" size={48} />}
+              <p className="font-display text-4xl text-[#80C997] sm:text-5xl">{kitchenLeader?.kitchenMinutes?.toLocaleString('pt-BR') ?? '—'}<span className="text-xl">{kitchenLeader ? ' min' : ''}</span></p>
             </div>
-            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55">{period === 'dia' ? <><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo no dia</> : 'Quantidade acumulada até a data selecionada'}</div>
+            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55"><Clock3 className="mr-1.5 inline" size={15} />Menor tempo médio de preparo no {periodLabel}</div>
           </article>
         </section>
 
         <section className="mt-5 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
           <RankingCard title={`Ranking de vendas do ${periodLabel}`} subtitle="Quantidade de vendas por unidade" icon={<Trophy size={20} />} units={salesRanking} />
-          {period === 'dia' ? <RankingCard title="Velocidade da cozinha" subtitle="Menos minutos, melhor posição" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" /> : <InformationCard units={salesRanking} />}
+          <RankingCard title={period === 'mes' ? 'Tempo médio mensal' : 'Velocidade da cozinha'} subtitle="Menos minutos, melhor posição" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
         </section>
         </>}
 
@@ -402,18 +413,9 @@ function DailyRankingPanel({ ranking, selectedDate, loading, onSelectDate }: { r
   )
 }
 
-function InformationCard({ units }: { units: UnitScore[] }) {
-  return (
-    <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4"><div><h2 className="font-display text-xl sm:text-2xl">Vendas por unidade</h2><p className="mt-1 text-xs text-white/50">Quantidade acumulada no {units.length ? 'período selecionado' : 'período'}</p></div><span className="rounded-xl bg-white/8 p-2.5 text-[#EFE3C4]"><ShoppingBag size={20} /></span></div>
-      <div className="mt-2 divide-y divide-white/8">{units.map((unit) => <div key={unit.name} className="flex items-center justify-between gap-3 py-4"><p className="font-bold">{unit.name}</p><strong className="font-display text-lg">{unit.orders} vendas</strong></div>)}</div>
-    </article>
-  )
-}
-
 function RankingCard({ title, subtitle, icon, units, type = 'sales' }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type?: 'sales' | 'kitchen' }) {
   const maxOrders = Math.max(1, ...units.map((unit) => unit.orders))
-  const fastestKitchen = units.find((unit) => unit.kitchenMinutes !== null)?.kitchenMinutes ?? 0
+  const fastestKitchen = units.find((unit) => typeof unit.kitchenMinutes === 'number')?.kitchenMinutes ?? 0
   return (
     <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
       <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
