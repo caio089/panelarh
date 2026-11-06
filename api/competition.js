@@ -27,6 +27,16 @@ function kitchenMinutes(report) {
   return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
 }
 
+function dailyResultClosed(date, today, now = new Date()) {
+  if (date < today) return true
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+  return hour > 23 || (hour === 23 && minute >= 40)
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
   const today = todayInFortaleza()
@@ -46,6 +56,7 @@ export default async function handler(req, res) {
   // A competição mensal é sempre o acumulado do mês corrente. Isso evita que
   // um link ou cache de um mês anterior apareça como se fosse o mês atual.
   const date = period === 'mes' ? today : requestedDate || today
+  const scoreboardClosed = period === 'dia' && dailyResultClosed(date, today)
   const loadScoreboard = async (signal, fresh = false) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
@@ -102,6 +113,15 @@ export default async function handler(req, res) {
     return payload
   }
 
+  const cached = await readCompetitionCache(period, date, metric)
+
+  // Depois das 23h40, o último placar salvo vira o resultado oficial do dia.
+  // Mesmo uma chamada de atualização não deve alterar esse resultado.
+  if (forceRefresh && scoreboardClosed && cached) {
+    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
+    return res.status(200).json({ ...cached, cached: true, closed: true })
+  }
+
   // A TV inicia esta consulta antes da troca visual. Diferente do fluxo normal,
   // ela precisa esperar dados novos em vez de receber o cache atual.
   if (forceRefresh) {
@@ -121,9 +141,8 @@ export default async function handler(req, res) {
 
   // Não use o cache "latest": ele pode pertencer a outro mês e misturar o
   // placar atual com as vendas do mês anterior.
-  const cached = await readCompetitionCache(period, date, metric)
   if (cached) {
-    waitUntil(refreshScoreboard().catch(() => undefined))
+    if (!scoreboardClosed) waitUntil(refreshScoreboard().catch(() => undefined))
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     if (dailyRanking) return res.status(200).json({ ...cached, cached: true })
     return res.status(200).json({
@@ -133,6 +152,7 @@ export default async function handler(req, res) {
         ? cached.units.map(({ id, name, orders, kitchenMinutes: averageKitchenMinutes }) => ({ id, name, orders, kitchenMinutes: averageKitchenMinutes }))
         : [],
       cached: true,
+      closed: scoreboardClosed,
       stale: cached.date !== date,
     })
   }
