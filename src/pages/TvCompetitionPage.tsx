@@ -1,4 +1,4 @@
-import { CalendarDays, CalendarRange, Clock3, Crown, RefreshCw, Trophy, UtensilsCrossed } from 'lucide-react'
+import { CalendarDays, CalendarRange, Clock3, RefreshCw, Trophy } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
@@ -34,16 +34,6 @@ function isNightServiceWindow(now = new Date()) {
   const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
   const minutes = hour * 60 + minute
   return minutes >= 17 * 60 + 30 && minutes < DAILY_RESULT_HOUR * 60 + DAILY_RESULT_MINUTE
-}
-
-function fortalezaTime(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(now)
-  return {
-    hour: Number(parts.find((part) => part.type === 'hour')?.value ?? 0),
-    minute: Number(parts.find((part) => part.type === 'minute')?.value ?? 0),
-  }
 }
 
 function pointsForPosition(position: number) {
@@ -250,8 +240,6 @@ export function TvCompetitionPage() {
 
   const salesRanking = [...units].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
-  const salesLeader = salesRanking[0]
-  const kitchenLeader = kitchenRanking.find((unit) => typeof unit.kitchenMinutes === 'number')
   const scores = salesRanking.map((unit) => {
     const salesIndex = salesRanking.findIndex((item) => item.name === unit.name)
     const kitchenIndex = kitchenRanking.findIndex((item) => item.name === unit.name)
@@ -263,17 +251,7 @@ export function TvCompetitionPage() {
     const kitchenPoints = pointsForPosition(kitchenPosition)
     return { name: unit.name, salesPoints, kitchenPoints, total: salesPoints + kitchenPoints }
   }).sort((a, b) => b.total - a.total || b.salesPoints - a.salesPoints || a.name.localeCompare(b.name))
-  const scoringReady = units.length > 0 && units.every((unit) => typeof unit.kitchenMinutes === 'number')
-  const topScore = scoringReady ? scores[0]?.total ?? 0 : 0
-  const champions = topScore > 0 ? scores.filter((unit) => unit.total === topScore) : []
-  const championNames = champions.map((unit) => unit.name).join(' e ')
-  const championBreakdown = champions.length === 1 ? champions[0] : null
   const periodLabel = period === 'mes' ? 'mês' : 'dia'
-  const currentTime = fortalezaTime()
-  const dailyResultClosed = date < today
-    || currentTime.hour > DAILY_RESULT_HOUR
-    || (currentTime.hour === DAILY_RESULT_HOUR && currentTime.minute >= DAILY_RESULT_MINUTE)
-  const championLabel = period === 'mes' ? 'Líder do mês' : dailyResultClosed ? 'Campeã do dia' : 'Liderança parcial do dia'
   return (
     <main className="min-h-screen overflow-hidden bg-[#090E20] px-5 py-5 text-[#F9F6EC] sm:px-9 lg:px-12 lg:py-8">
       <div className="pointer-events-none fixed -left-32 top-20 h-[32rem] w-[32rem] rounded-full bg-[#3151A7]/25 blur-[140px]" />
@@ -318,39 +296,27 @@ export function TvCompetitionPage() {
           </div>
         </section>
 
-        {view === 'ranking' ? <CompetitionRankingPanel scores={scores} salesRanking={salesRanking} kitchenRanking={kitchenRanking} periodLabel={periodLabel} /> : <>
-        <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <article className="relative overflow-hidden rounded-[28px] border border-[#F4B942]/35 bg-gradient-to-br from-[#303060] via-[#182658] to-[#101a3a] p-5 shadow-2xl sm:p-7">
-            <Crown className="absolute -right-4 -top-3 text-[#F4B942]/15" size={190} strokeWidth={1} />
-            <p className="relative text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]">{championLabel}</p>
-            <div className="relative mt-5 flex items-end justify-between gap-4">
-              <div>
-                <h2 className="font-display text-4xl sm:text-5xl">{championNames || 'Atualizando'}</h2>
-                <p className="mt-2 text-base text-white/65">{period === 'dia' && !dailyResultClosed ? 'Resultado oficial às 23h40' : 'Vendas + velocidade da cozinha'}</p>
-              </div>
-              <Trophy className="mb-1 shrink-0 text-[#F4B942]" size={52} />
-            </div>
-            <div className="relative mt-7 flex items-end justify-between gap-4 border-t border-white/15 pt-5">
-              <p className="font-display text-3xl text-[#F4B942] sm:text-4xl">{champions.length ? `${topScore} pontos` : '—'}</p>
-              <p className="text-right text-sm text-white/65">{championBreakdown ? `${championBreakdown.salesPoints} vendas + ${championBreakdown.kitchenPoints} rapidez` : 'pontuação somada'}<br />no {periodLabel}</p>
-            </div>
-          </article>
-
-          <article className="rounded-[28px] border border-white/10 bg-white/[0.06] p-5 sm:p-7">
-            <div className="flex items-center gap-2 text-[#80C997]"><UtensilsCrossed size={21} /><p className="text-xs font-bold uppercase tracking-[0.18em]">Prêmio da competição</p></div>
-            <div className="mt-5">
-              <h2 className="font-display text-4xl leading-tight sm:text-5xl">Rodízio para toda a equipe</h2>
-              <p className="mt-3 max-w-xl text-base leading-relaxed text-white/65">Todos os colaboradores da unidade campeã ganham um rodízio.</p>
-            </div>
-            <div className="mt-7 border-t border-white/12 pt-4 text-sm text-white/55"><Trophy className="mr-1.5 inline" size={15} />A soma de vendas e rapidez define a vencedora</div>
-          </article>
-        </section>
-
-        <section className="mt-5 grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
-          <MetricSummaryCard title={`Mais vendas do ${periodLabel}`} name={salesLeader?.name} value={salesLeader ? `${salesLeader.orders} vendas` : undefined} icon={<Trophy size={23} />} />
-          <MetricSummaryCard title={`Mais rápida no ${periodLabel}`} name={kitchenLeader?.name} value={typeof kitchenLeader?.kitchenMinutes === 'number' ? `${kitchenLeader.kitchenMinutes.toLocaleString('pt-BR')} min` : undefined} icon={<Clock3 size={23} />} />
-        </section>
-        </>}
+        {view === 'ranking' ? <CompetitionRankingPanel scores={scores} salesRanking={salesRanking} kitchenRanking={kitchenRanking} periodLabel={periodLabel} /> : (
+          <section className="grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
+            <RankingCard
+              title={period === 'mes' ? 'Vendas no mês' : 'Vendas em tempo real'}
+              subtitle={`Ranking de vendas do ${periodLabel}`}
+              icon={<Trophy size={24} />}
+              units={salesRanking}
+              showPoints={false}
+              prominent
+            />
+            <RankingCard
+              title={period === 'mes' ? 'Tempo médio no mês' : 'Tempo médio em tempo real'}
+              subtitle={`Ranking de rapidez do ${periodLabel}`}
+              icon={<Clock3 size={24} />}
+              units={kitchenRanking}
+              type="kitchen"
+              showPoints={false}
+              prominent
+            />
+          </section>
+        )}
 
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
@@ -391,22 +357,14 @@ function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodL
   )
 }
 
-function MetricSummaryCard({ title, name, value, icon }: { title: string; name?: string; value?: string; icon: ReactNode }) {
-  return (
-    <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-5 shadow-xl backdrop-blur sm:p-6">
-      <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.17em] text-white/50">{title}</p><h2 className="mt-3 font-display text-4xl">{name ?? 'Atualizando'}</h2><p className="mt-2 text-lg text-[#F4B942]">{value ?? '—'}</p></div><span className="rounded-2xl bg-white/8 p-4 text-[#EFE3C4]">{icon}</span></div>
-    </article>
-  )
-}
-
-function RankingCard({ title, subtitle, icon, units, type = 'sales' }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type?: 'sales' | 'kitchen' }) {
+function RankingCard({ title, subtitle, icon, units, type = 'sales', showPoints = true, prominent = false }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type?: 'sales' | 'kitchen'; showPoints?: boolean; prominent?: boolean }) {
   const maxOrders = Math.max(1, ...units.map((unit) => unit.orders))
   const fastestKitchen = units.find((unit) => typeof unit.kitchenMinutes === 'number')?.kitchenMinutes ?? 0
   return (
-    <article className="rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-4 shadow-xl backdrop-blur sm:p-5">
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-        <div><h2 className="font-display text-xl sm:text-2xl">{title}</h2><p className="mt-1 text-xs text-white/50">{subtitle}</p></div>
-        <span className="rounded-xl bg-white/8 p-2.5 text-[#EFE3C4]">{icon}</span>
+    <article className={`rounded-[28px] border border-white/10 bg-[#0D1731]/80 shadow-xl backdrop-blur ${prominent ? 'p-5 sm:p-7' : 'p-4 sm:p-5'}`}>
+      <div className={`flex items-center justify-between gap-3 border-b border-white/10 ${prominent ? 'pb-5' : 'pb-4'}`}>
+        <div><h2 className={`font-display ${prominent ? 'text-3xl sm:text-4xl' : 'text-xl sm:text-2xl'}`}>{title}</h2><p className={`mt-1 text-white/50 ${prominent ? 'text-sm' : 'text-xs'}`}>{subtitle}</p></div>
+        <span className={`rounded-xl bg-white/8 text-[#EFE3C4] ${prominent ? 'p-3.5' : 'p-2.5'}`}>{icon}</span>
       </div>
       <ol className="mt-2 divide-y divide-white/8">
         {units.map((unit, index) => {
@@ -417,10 +375,10 @@ function RankingCard({ title, subtitle, icon, units, type = 'sales' }: { title: 
             : rankingPosition(units, index, (item) => -(item.kitchenMinutes ?? Infinity))
           const points = typeof unit.kitchenMinutes === 'number' || type === 'sales' ? pointsForPosition(position) : 0
           const hasPosition = type === 'sales' || typeof unit.kitchenMinutes === 'number'
-          return <li key={unit.name} className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 py-3 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-3">
-            <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${hasPosition && position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/8 text-white/65'}`}>{hasPosition ? position : '—'}</span>
-            <div className="min-w-0"><div className="flex justify-between gap-2"><p className="truncate text-sm font-bold sm:text-base">{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? `${unit.orders} vendas` : 'preparo'}</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
-            <div className="text-right"><strong className="block font-display text-base text-[#F9F6EC] sm:text-lg">{value}</strong><span className="text-xs font-extrabold text-[#F4B942]">+{points} pts</span></div>
+          return <li key={unit.name} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-3 ${prominent ? 'py-5' : 'py-3'}`}>
+            <span className={`flex items-center justify-center rounded-full font-extrabold ${prominent ? 'h-10 w-10 text-lg' : 'h-7 w-7 text-sm'} ${hasPosition && position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/8 text-white/65'}`}>{hasPosition ? position : '—'}</span>
+            <div className="min-w-0"><div className="flex justify-between gap-2"><p className={`truncate font-bold ${prominent ? 'text-lg sm:text-xl' : 'text-sm sm:text-base'}`}>{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? `${unit.orders} vendas` : 'preparo'}</span></div><div className={`mt-2 overflow-hidden rounded-full bg-white/10 ${prominent ? 'h-2' : 'h-1.5'}`}><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
+            <div className="text-right"><strong className={`block font-display text-[#F9F6EC] ${prominent ? 'text-2xl sm:text-3xl' : 'text-base sm:text-lg'}`}>{value}</strong>{showPoints ? <span className="text-xs font-extrabold text-[#F4B942]">+{points} pts</span> : null}</div>
           </li>
         })}
       </ol>
