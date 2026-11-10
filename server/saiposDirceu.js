@@ -565,20 +565,49 @@ function rememberRaw(key, rows) {
 }
 
 const KITCHEN_STAGES = ['Cozinha', 'Aguardando Entrega', 'Saiu para entrega', 'Entregue', 'Finalizado', 'Cancelados']
+const ACTIVE_KITCHEN_STAGES = new Set(['Cozinha', 'Aguardando Entrega', 'Saiu para entrega'])
+const URGENT_KITCHEN_MINUTES = 20
 
-/** Último status e duração de cada etapa. Sem nome, telefone ou pedido identificável. */
+function fortalezaTimestamp(value) {
+  const raw = text(value)
+  if (!raw) return null
+  const timestamp = Date.parse(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}-03:00`)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function shortSaleCode(value) {
+  const normalized = label(value).replace(/[^a-zA-Z0-9]/g, '')
+  return normalized ? normalized.slice(-6).toUpperCase() : '—'
+}
+
+/** Último status, duração e fila operacional. Sem nome, telefone ou endereço de cliente. */
 function summarizeKitchen(rows) {
   const current = new Map()
   const stages = new Map()
+  const queue = []
+  const now = Date.now()
 
   for (const row of rows) {
     const steps = (Array.isArray(row.histories) ? row.histories : [])
       .slice()
       .sort((a, b) => num(a.order) - num(b.order))
     const lastName = text(steps[steps.length - 1]?.desc_store_sale_status) || 'Sem status'
+    const lastStep = steps[steps.length - 1]
     const status = current.get(lastName) || { label: lastName, count: 0 }
     status.count += 1
     current.set(lastName, status)
+
+    if (ACTIVE_KITCHEN_STAGES.has(lastName)) {
+      const enteredAt = fortalezaTimestamp(lastStep?.created_at)
+      const waitingMinutes = enteredAt === null ? null : Math.max(0, Math.floor((now - enteredAt) / 60000))
+      queue.push({
+        code: shortSaleCode(row.id_sale),
+        status: lastName,
+        enteredAt: text(lastStep?.created_at) || null,
+        waitingMinutes,
+        urgent: typeof waitingMinutes === 'number' && waitingMinutes >= URGENT_KITCHEN_MINUTES,
+      })
+    }
 
     for (const step of steps) {
       const name = text(step.desc_store_sale_status) || 'Sem status'
@@ -609,6 +638,7 @@ function summarizeKitchen(rows) {
   const preparing = countOf('Cozinha')
   const waiting = countOf('Aguardando Entrega')
   const onTheWay = countOf('Saiu para entrega')
+  queue.sort((a, b) => (b.waitingMinutes ?? -1) - (a.waitingMinutes ?? -1) || a.code.localeCompare(b.code))
   return {
     total: rows.length,
     preparing,
@@ -617,6 +647,9 @@ function summarizeKitchen(rows) {
     finished: countOf('Finalizado') + countOf('Entregue'),
     canceled: countOf('Cancelados'),
     active: preparing + waiting + onTheWay,
+    urgent: queue.filter((item) => item.urgent).length,
+    urgentAfterMinutes: URGENT_KITCHEN_MINUTES,
+    queue,
     current: ordered(current, (item) => ({ label: item.label, count: item.count })),
     stages: ordered(stages, (item) => ({
       label: item.label,

@@ -9,6 +9,9 @@
     "api/competition.js": {
       "maxDuration": 300
     },
+    "api/kds.js": {
+      "maxDuration": 300
+    },
     "api/selecao.js": {
       "maxDuration": 60
     }

@@ -1,7 +1,9 @@
-import { CalendarDays, CalendarRange, Clock3, RefreshCw, Trophy } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { AlertTriangle, CalendarDays, CalendarRange, ChefHat, Clock3, LogOut, RefreshCw, ShieldCheck, Trophy } from 'lucide-react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import type { Session } from '@supabase/supabase-js'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
+import { tvSupabase } from '@/lib/tvAccess'
 
 type UnitScore = {
   name: string
@@ -13,8 +15,30 @@ type UnitScore = {
 type CompetitionPeriod = 'dia' | 'mes'
 type CompetitionView = 'placar' | 'ranking'
 
+type KdsOrder = {
+  code: string
+  status: string
+  enteredAt: string | null
+  waitingMinutes: number | null
+  urgent: boolean
+}
+
+type KdsPayload = {
+  unit: string
+  fetchedAt: string
+  active: number
+  preparing: number
+  waiting: number
+  onTheWay: number
+  urgent: number
+  urgentAfterMinutes: number
+  queue: KdsOrder[]
+}
+
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
+const TV_UNITS: Record<string, string> = { dirceu: 'Dirceu', promorar: 'Promorar', mocambinho: 'Mocambinho' }
 const REFRESH_MS = 60 * 1000
+const KDS_REFRESH_MS = 30 * 1000
 const PREPARE_REFRESH_MS = 40 * 1000
 const AUTO_SLIDE_MS = 60 * 1000
 const DAILY_RESULT_HOUR = 23
@@ -43,7 +67,9 @@ function pointsForPosition(position: number) {
 }
 
 export function TvCompetitionPage() {
+  const { unit: requestedUnit } = useParams()
   const [params, setParams] = useSearchParams()
+  const tvUnitId = requestedUnit && TV_UNITS[requestedUnit] ? requestedUnit : null
   const today = todayInFortaleza()
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
@@ -123,22 +149,36 @@ export function TvCompetitionPage() {
     monthPrefetchDate.current = date
     let alive = true
     async function prefetchMonth() {
+      const kitchenRequest = fetch(`/api/competition?dia=${date}&periodo=mes&dados=cozinha`)
+        .then(async (response) => {
+          if (!response.ok) return null
+          return await response.json() as { units?: Omit<UnitScore, 'accent'>[] }
+        })
+        .catch(() => null)
+
       try {
-        const [salesResponse, kitchenResponse] = await Promise.all([
-          fetch(`/api/competition?dia=${date}&periodo=mes`),
-          fetch(`/api/competition?dia=${date}&periodo=mes&dados=cozinha`),
-        ])
+        const salesResponse = await fetch(`/api/competition?dia=${date}&periodo=mes`)
         const salesPayload = (await salesResponse.json()) as { units?: Omit<UnitScore, 'accent'>[] }
-        const kitchenPayload = kitchenResponse.ok ? await kitchenResponse.json() as { units?: Omit<UnitScore, 'accent'>[] } : null
-        if (!salesResponse.ok || !salesPayload.units || !alive) return
-        const kitchens = new Map(kitchenPayload?.units?.map((unit) => [unit.name, unit.kitchenMinutes]) ?? [])
+        if (!salesResponse.ok || !salesPayload.units) throw new Error('Não foi possível carregar o placar mensal.')
+        if (!alive) return
+
+        // Publica as vendas assim que elas chegam. O consolidado mensal da
+        // cozinha é mais demorado e não pode impedir a troca da TV para o mês.
         setUnitsByPeriod((current) => ({
           ...current,
           mes: salesPayload.units!.map((unit) => ({
             ...unit,
-            kitchenMinutes: kitchens.get(unit.name) ?? null,
+            kitchenMinutes: null,
             accent: ACCENTS[unit.name] ?? '#EFE3C4',
           })),
+        }))
+
+        const kitchenPayload = await kitchenRequest
+        if (!alive || !kitchenPayload?.units) return
+        const kitchens = new Map(kitchenPayload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
+        setUnitsByPeriod((current) => ({
+          ...current,
+          mes: current.mes.map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })),
         }))
       } catch {
         monthPrefetchDate.current = null
@@ -318,6 +358,8 @@ export function TvCompetitionPage() {
           </section>
         )}
 
+        {tvUnitId ? <TvUnitOperation unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} /> : null}
+
         <footer className="flex items-center justify-between gap-4 pt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35 sm:text-xs">
           <span>Panela Velha · competição interna</span>
           <span className="text-right">{error || (view === 'ranking' ? 'Ranking mensal e diário por pontuação' : automaticRefresh && period === 'dia' && date === currentCompetitionDay ? 'Atualização automática · Dia e Mês alternam a cada 1 min' : 'Dia e Mês alternam a cada 1 min')}</span>
@@ -325,6 +367,170 @@ export function TvCompetitionPage() {
       </div>
     </main>
   )
+}
+
+function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: string }) {
+  const supabase = tvSupabase()
+  const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [data, setData] = useState<KdsPayload | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true)
+      setError('A autenticação da TV não está configurada neste ambiente.')
+      return
+    }
+    let alive = true
+    void supabase.auth.getSession().then(({ data: auth }) => {
+      if (!alive) return
+      setSession(auth.session)
+      setAuthReady(true)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthReady(true)
+      if (!nextSession) setData(null)
+    })
+    return () => {
+      alive = false
+      listener.subscription.unsubscribe()
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    if (!session) return
+    let alive = true
+    let timer: number | undefined
+    const load = async () => {
+      setLoading(true)
+      try {
+        const response = await fetch(`/api/kds?unidade=${unitId}`, {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        const payload = (await response.json()) as KdsPayload & { error?: string }
+        if (!response.ok) throw Object.assign(new Error(payload.error || 'Não foi possível atualizar o KDS.'), { status: response.status })
+        if (!alive) return
+        setData(payload)
+        setError('')
+      } catch (reason) {
+        if (!alive) return
+        const status = reason instanceof Error && 'status' in reason ? Number(reason.status) : 0
+        setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o KDS.')
+        if (status === 401) void supabase?.auth.signOut()
+      } finally {
+        if (alive) {
+          setLoading(false)
+          timer = window.setTimeout(() => { void load() }, KDS_REFRESH_MS)
+        }
+      }
+    }
+    void load()
+    return () => {
+      alive = false
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [session, supabase, unitId])
+
+  async function signIn(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setSigningIn(true)
+    setError('')
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    setSigningIn(false)
+    if (signInError) setError('E-mail ou senha inválidos para a operação da unidade.')
+  }
+
+  if (!authReady) {
+    return <section className="mt-6 rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-6 text-white/60">Validando acesso à operação…</section>
+  }
+
+  if (!session) {
+    return (
+      <section className="mt-6 rounded-[28px] border border-[#F4B942]/25 bg-[#0D1731]/95 p-5 shadow-xl sm:p-7">
+        <div className="grid gap-6 lg:grid-cols-[1fr_26rem] lg:items-center">
+          <div>
+            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]"><ShieldCheck size={17} /> Pedidos protegidos</p>
+            <h2 className="mt-2 font-display text-3xl sm:text-4xl">Operação {unitName}</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/60">O ranking acima é comum às três casas. A fila do KDS exige a conta vinculada a esta unidade e não pode ser liberada apenas alterando o endereço da página.</p>
+          </div>
+          <form onSubmit={(event) => void signIn(event)} className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+            <input aria-label="E-mail da unidade" type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="E-mail da unidade" className="w-full rounded-xl border border-white/10 bg-[#090E20] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#F4B942]/60" />
+            <input aria-label="Senha" type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Senha" className="w-full rounded-xl border border-white/10 bg-[#090E20] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#F4B942]/60" />
+            {error ? <p className="text-sm text-[#FF9A8A]">{error}</p> : null}
+            <button type="submit" disabled={signingIn} className="w-full rounded-xl bg-[#F4B942] px-4 py-3 text-sm font-extrabold text-[#18142A] disabled:opacity-60">{signingIn ? 'Validando…' : 'Entrar na operação'}</button>
+          </form>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="mt-6 rounded-[28px] border border-white/10 bg-[#0D1731]/90 p-5 shadow-xl sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-5">
+        <div>
+          <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#80C997]"><ShieldCheck size={17} /> Acesso restrito à unidade</p>
+          <h2 className="mt-2 font-display text-3xl sm:text-4xl">Fila do KDS · {unitName}</h2>
+          <p className="mt-2 text-sm text-white/55">Pedidos com {data?.urgentAfterMinutes ?? 20} min ou mais no estágio atual aparecem como urgentes · atualização a cada 30 s</p>
+        </div>
+        <button type="button" onClick={() => void supabase?.auth.signOut()} className="inline-flex items-center gap-2 rounded-xl bg-white/8 px-3 py-2 text-xs font-bold text-white/65 hover:bg-white/12"><LogOut size={15} /> Sair</button>
+      </div>
+
+      {error ? <div className="mt-4 rounded-xl border border-[#E15B3F]/35 bg-[#E15B3F]/10 px-4 py-3 text-sm text-[#FFB3A6]">{error}</div> : null}
+      {data ? (
+        <>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <KdsMetric label="Em movimento" value={data.active} icon={<Clock3 size={19} />} />
+            <KdsMetric label="Na cozinha" value={data.preparing} icon={<ChefHat size={19} />} />
+            <KdsMetric label="Aguardando saída" value={data.waiting} icon={<RefreshCw size={19} />} />
+            <KdsMetric label="Urgentes" value={data.urgent} icon={<AlertTriangle size={19} />} urgent={data.urgent > 0} />
+          </div>
+          {data.queue.length === 0 ? (
+            <div className="mt-5 rounded-2xl bg-white/[0.05] px-5 py-8 text-center text-sm text-white/55">Nenhum pedido em movimento nesta unidade.</div>
+          ) : (
+            <ol className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {data.queue.map((order, index) => (
+                <li key={`${order.code}-${index}`} className={`rounded-2xl border px-4 py-4 ${order.urgent ? 'border-[#E15B3F]/55 bg-[#E15B3F]/12' : 'border-white/10 bg-white/[0.05]'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/45">Pedido {order.code}</span>
+                    {order.urgent ? <span className="rounded-full bg-[#E15B3F] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white">Urgente</span> : null}
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div><p className="font-display text-xl">{kdsStatusLabel(order.status)}</p><p className="mt-1 text-xs text-white/45">no estágio atual</p></div>
+                    <strong className={`font-display text-3xl tabular-nums ${order.urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes} min` : '—'}</strong>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="mt-4 text-right text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35">{loading ? 'Atualizando Saipos…' : `Atualizado ${formatKdsTime(data.fetchedAt)}`}</p>
+        </>
+      ) : loading ? <p className="mt-6 text-sm text-white/55">Buscando pedidos da {unitName}…</p> : null}
+    </section>
+  )
+}
+
+function KdsMetric({ label, value, icon, urgent = false }: { label: string; value: number; icon: ReactNode; urgent?: boolean }) {
+  return <div className={`rounded-2xl border px-4 py-4 ${urgent ? 'border-[#E15B3F]/50 bg-[#E15B3F]/12' : 'border-white/10 bg-white/[0.05]'}`}><div className="flex items-center justify-between text-white/45"><span className="text-[11px] font-bold uppercase tracking-[0.12em]">{label}</span>{icon}</div><p className={`mt-2 font-display text-4xl tabular-nums ${urgent ? 'text-[#FF8E78]' : ''}`}>{value}</p></div>
+}
+
+function kdsStatusLabel(status: string) {
+  if (status === 'Cozinha') return 'Em preparo'
+  if (status === 'Aguardando Entrega') return 'Pronto para sair'
+  if (status === 'Saiu para entrega') return 'Em entrega'
+  return status
+}
+
+function formatKdsTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'agora' : new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date)
 }
 
 type CompetitionScore = { name: string; salesPoints: number; kitchenPoints: number; total: number }

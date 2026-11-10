@@ -127,6 +127,15 @@ export interface CozinhaReport {
   finished: number
   canceled: number
   active: number
+  urgent: number
+  urgentAfterMinutes: number
+  queue: {
+    code: string
+    status: string
+    enteredAt: string | null
+    waitingMinutes: number | null
+    urgent: boolean
+  }[]
   current: KitchenStatus[]
   stages: KitchenStage[]
 }
