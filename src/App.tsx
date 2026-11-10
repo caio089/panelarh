@@ -36,6 +36,9 @@ export default function App() {
               <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
               <Route path="/tv/competicao" element={<TvCompetitionPage />} />
               <Route path="/tv/:unit" element={<TvCompetitionPage />} />
+              <Route path="/dirceu" element={<TvCompetitionPage />} />
+              <Route path="/promorar" element={<TvCompetitionPage />} />
+              <Route path="/mocambinho" element={<TvCompetitionPage />} />
 
               {/* Legado candidato → site público */}
               <Route path="/auth" element={<Navigate to="/" replace />} />

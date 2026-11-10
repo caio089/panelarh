@@ -1,14 +1,13 @@
 import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
-import { authorizeTvUnit } from '../server/tvAccess.js'
+import { saiposUnit } from '../server/saiposUnits.js'
 
 export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'private, no-store')
-  res.setHeader('Vary', 'Authorization')
+  res.setHeader('Cache-Control', 'no-store')
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
 
   const unitId = typeof req.query?.unidade === 'string' ? req.query.unidade.trim().toLowerCase() : ''
-  const access = await authorizeTvUnit(req, unitId)
-  if (!access.unit) return res.status(access.status || 403).json({ error: access.error || 'Acesso negado.' })
+  const unit = saiposUnit(unitId)
+  if (!unit) return res.status(404).json({ error: 'Unidade não encontrada.' })
 
   const controller = new AbortController()
   req.on?.('close', () => controller.abort())
@@ -17,15 +16,15 @@ export default async function handler(req, res) {
       date: todayInFortaleza(),
       category: 'cozinha',
       period: 'dia',
-      token: access.unit.token(),
+      token: unit.token(),
       signal: controller.signal,
       fresh: true,
-      unit: access.unit.name,
-      cacheScope: access.unit.id,
+      unit: unit.name,
+      cacheScope: unit.id,
     })
     const report = payload.report || {}
     return res.status(200).json({
-      unit: access.unit.name,
+      unit: unit.name,
       fetchedAt: payload.fetchedAt,
       active: report.active || 0,
       preparing: report.preparing || 0,

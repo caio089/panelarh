@@ -1,9 +1,7 @@
-import { AlertTriangle, CalendarDays, CalendarRange, ChefHat, Clock3, LogOut, RefreshCw, ShieldCheck, Trophy } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
-import type { Session } from '@supabase/supabase-js'
+import { AlertTriangle, CalendarDays, CalendarRange, ChefHat, Clock3, RefreshCw, Store, Trophy } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
-import { tvSupabase } from '@/lib/tvAccess'
 
 type UnitScore = {
   name: string
@@ -68,8 +66,10 @@ function pointsForPosition(position: number) {
 
 export function TvCompetitionPage() {
   const { unit: requestedUnit } = useParams()
+  const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
-  const tvUnitId = requestedUnit && TV_UNITS[requestedUnit] ? requestedUnit : null
+  const routeUnit = requestedUnit || pathname.split('/').filter(Boolean)[0] || ''
+  const tvUnitId = TV_UNITS[routeUnit] ? routeUnit : null
   const today = todayInFortaleza()
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
@@ -370,41 +370,11 @@ export function TvCompetitionPage() {
 }
 
 function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: string }) {
-  const supabase = tvSupabase()
-  const [session, setSession] = useState<Session | null>(null)
-  const [authReady, setAuthReady] = useState(false)
   const [data, setData] = useState<KdsPayload | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
-    if (!supabase) {
-      setAuthReady(true)
-      setError('A autenticação da TV não está configurada neste ambiente.')
-      return
-    }
-    let alive = true
-    void supabase.auth.getSession().then(({ data: auth }) => {
-      if (!alive) return
-      setSession(auth.session)
-      setAuthReady(true)
-    })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-      setAuthReady(true)
-      if (!nextSession) setData(null)
-    })
-    return () => {
-      alive = false
-      listener.subscription.unsubscribe()
-    }
-  }, [supabase])
-
-  useEffect(() => {
-    if (!session) return
     let alive = true
     let timer: number | undefined
     const load = async () => {
@@ -412,7 +382,6 @@ function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: strin
       try {
         const response = await fetch(`/api/kds?unidade=${unitId}`, {
           cache: 'no-store',
-          headers: { Authorization: `Bearer ${session.access_token}` },
         })
         const payload = (await response.json()) as KdsPayload & { error?: string }
         if (!response.ok) throw Object.assign(new Error(payload.error || 'Não foi possível atualizar o KDS.'), { status: response.status })
@@ -421,9 +390,7 @@ function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: strin
         setError('')
       } catch (reason) {
         if (!alive) return
-        const status = reason instanceof Error && 'status' in reason ? Number(reason.status) : 0
         setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o KDS.')
-        if (status === 401) void supabase?.auth.signOut()
       } finally {
         if (alive) {
           setLoading(false)
@@ -436,51 +403,16 @@ function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: strin
       alive = false
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [session, supabase, unitId])
-
-  async function signIn(event: FormEvent) {
-    event.preventDefault()
-    if (!supabase) return
-    setSigningIn(true)
-    setError('')
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-    setSigningIn(false)
-    if (signInError) setError('E-mail ou senha inválidos para a operação da unidade.')
-  }
-
-  if (!authReady) {
-    return <section className="mt-6 rounded-[28px] border border-white/10 bg-[#0D1731]/80 p-6 text-white/60">Validando acesso à operação…</section>
-  }
-
-  if (!session) {
-    return (
-      <section className="mt-6 rounded-[28px] border border-[#F4B942]/25 bg-[#0D1731]/95 p-5 shadow-xl sm:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1fr_26rem] lg:items-center">
-          <div>
-            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#F4B942]"><ShieldCheck size={17} /> Pedidos protegidos</p>
-            <h2 className="mt-2 font-display text-3xl sm:text-4xl">Operação {unitName}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/60">O ranking acima é comum às três casas. A fila do KDS exige a conta vinculada a esta unidade e não pode ser liberada apenas alterando o endereço da página.</p>
-          </div>
-          <form onSubmit={(event) => void signIn(event)} className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
-            <input aria-label="E-mail da unidade" type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="E-mail da unidade" className="w-full rounded-xl border border-white/10 bg-[#090E20] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#F4B942]/60" />
-            <input aria-label="Senha" type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Senha" className="w-full rounded-xl border border-white/10 bg-[#090E20] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#F4B942]/60" />
-            {error ? <p className="text-sm text-[#FF9A8A]">{error}</p> : null}
-            <button type="submit" disabled={signingIn} className="w-full rounded-xl bg-[#F4B942] px-4 py-3 text-sm font-extrabold text-[#18142A] disabled:opacity-60">{signingIn ? 'Validando…' : 'Entrar na operação'}</button>
-          </form>
-        </div>
-      </section>
-    )
-  }
+  }, [unitId])
 
   return (
     <section className="mt-6 rounded-[28px] border border-white/10 bg-[#0D1731]/90 p-5 shadow-xl sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-5">
         <div>
-          <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#80C997]"><ShieldCheck size={17} /> Acesso restrito à unidade</p>
+          <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#80C997]"><Store size={17} /> Operação da unidade</p>
           <h2 className="mt-2 font-display text-3xl sm:text-4xl">Fila do KDS · {unitName}</h2>
           <p className="mt-2 text-sm text-white/55">Pedidos com {data?.urgentAfterMinutes ?? 20} min ou mais no estágio atual aparecem como urgentes · atualização a cada 30 s</p>
         </div>
-        <button type="button" onClick={() => void supabase?.auth.signOut()} className="inline-flex items-center gap-2 rounded-xl bg-white/8 px-3 py-2 text-xs font-bold text-white/65 hover:bg-white/12"><LogOut size={15} /> Sair</button>
       </div>
 
       {error ? <div className="mt-4 rounded-xl border border-[#E15B3F]/35 bg-[#E15B3F]/10 px-4 py-3 text-sm text-[#FFB3A6]">{error}</div> : null}
