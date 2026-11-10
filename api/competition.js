@@ -27,6 +27,17 @@ function kitchenMinutes(report) {
   return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
 }
 
+function pointsForPosition(position) {
+  if (position === 1) return 3
+  if (position === 2) return 2
+  return 0
+}
+
+function rankingPosition(items, target, valueOf) {
+  const value = valueOf(target)
+  return 1 + items.filter((item) => valueOf(item) > value).length
+}
+
 function dailyResultClosed(date, today, now = new Date()) {
   if (date < today) return true
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -45,7 +56,7 @@ export default async function handler(req, res) {
   const dailyRanking = req.query?.modo === 'diario'
   const kitchenOnly = req.query?.dados === 'cozinha'
   const forceRefresh = req.query?.atualiza === '1'
-  const metric = dailyRanking ? 'ranking-diario' : kitchenOnly ? 'cozinha' : 'vendas'
+  const metric = dailyRanking ? 'ranking-pontos-diarios-v2' : kitchenOnly ? 'cozinha' : 'vendas'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
@@ -63,7 +74,13 @@ export default async function handler(req, res) {
         if (kitchenOnly) {
           try {
             const kitchen = await getSaiposReport({ date, category: 'cozinha', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
-            return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: kitchenMinutes(kitchen.report) }
+            return {
+              id: unit.id,
+              name: unit.name,
+              orders: 0,
+              kitchenMinutes: kitchenMinutes(kitchen.report),
+              dailyKitchenMinutes: kitchen.report.dailyKitchenMinutes || {},
+            }
           } catch {
             return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: null }
           }
@@ -81,19 +98,41 @@ export default async function handler(req, res) {
 
   const loadDailyRanking = async (signal, fresh = false) => {
     const start = `${today.slice(0, 7)}-01`
-    const dailyCounts = await Promise.all(
-      Object.values(SAIPOS_UNITS).map(async (unit) => ({
-        unit,
-        counts: await getSaiposDailySalesCounts({ start, end: today, token: unit.token(), signal, fresh, cacheScope: unit.id }),
-      })),
+    const dailyData = await Promise.all(
+      Object.values(SAIPOS_UNITS).map(async (unit) => {
+        const [counts, kitchen] = await Promise.all([
+          getSaiposDailySalesCounts({ start, end: today, token: unit.token(), signal, fresh, cacheScope: unit.id }),
+          getSaiposReport({ date: today, category: 'cozinha', period: 'mes', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id }),
+        ])
+        return { unit, counts, kitchen }
+      }),
     )
-    const wins = new Map(Object.values(SAIPOS_UNITS).map((unit) => [unit.id, 0]))
+    const standings = new Map(Object.values(SAIPOS_UNITS).map((unit) => [unit.id, {
+      id: unit.id, name: unit.name, salesPoints: 0, kitchenPoints: 0, total: 0,
+    }]))
     const days = monthDays(start, today).map((day) => {
-      const units = dailyCounts.map(({ unit, counts }) => ({ id: unit.id, name: unit.name, orders: counts.get(day) || 0 }))
-      const top = Math.max(...units.map((unit) => unit.orders))
-      const winners = top > 0 ? units.filter((unit) => unit.orders === top) : []
-      for (const winner of winners) wins.set(winner.id, (wins.get(winner.id) || 0) + 1)
-      return { date: day, units, winners: winners.map((unit) => unit.id) }
+      const units = dailyData.map(({ unit, counts, kitchen }) => ({
+        id: unit.id,
+        name: unit.name,
+        orders: counts.get(day) || 0,
+        kitchenMinutes: typeof kitchen.report.dailyKitchenMinutes?.[day] === 'number'
+          ? kitchen.report.dailyKitchenMinutes[day]
+          : null,
+      }))
+      for (const unit of units) {
+        const salesPosition = rankingPosition(units, unit, (item) => item.orders)
+        const kitchenPosition = typeof unit.kitchenMinutes === 'number'
+          ? rankingPosition(units, unit, (item) => -(item.kitchenMinutes ?? Infinity))
+          : 0
+        const salesPoints = unit.orders > 0 ? pointsForPosition(salesPosition) : 0
+        const kitchenPoints = kitchenPosition ? pointsForPosition(kitchenPosition) : 0
+        const standing = standings.get(unit.id)
+        standing.salesPoints += salesPoints
+        standing.kitchenPoints += kitchenPoints
+        standing.total += salesPoints + kitchenPoints
+        Object.assign(unit, { salesPoints, kitchenPoints, total: salesPoints + kitchenPoints })
+      }
+      return { date: day, units }
     })
     return {
       date: today,
@@ -101,7 +140,12 @@ export default async function handler(req, res) {
       metric,
       fetchedAt: new Date().toISOString(),
       days,
-      standings: Object.values(SAIPOS_UNITS).map((unit) => ({ id: unit.id, name: unit.name, wins: wins.get(unit.id) || 0 })),
+      standings: [...standings.values()].sort((a, b) => b.total - a.total || b.salesPoints - a.salesPoints || a.name.localeCompare(b.name)),
+      kitchenUnits: dailyData.map(({ unit, kitchen }) => ({
+        id: unit.id,
+        name: unit.name,
+        kitchenMinutes: kitchenMinutes(kitchen.report),
+      })),
     }
   }
 

@@ -16,7 +16,7 @@ export async function readCompetitionCache(period, date, metric) {
 }
 
 export async function saveCompetitionCache(period, date, metric, payload) {
-  const options = { ttl: metric === 'ranking-diario' ? 60 * 10 : period === 'mes' ? 60 * 60 * 12 : 60 * 60 * 36, tags: ['competition'], name: 'competition-scoreboard' }
+  const options = { ttl: metric.startsWith('ranking-') ? 60 * 10 : period === 'mes' ? 60 * 60 * 12 : 60 * 60 * 36, tags: ['competition'], name: 'competition-scoreboard' }
   try {
     await Promise.all([
       cache.set(key(period, date, metric), payload, options),

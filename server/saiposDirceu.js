@@ -566,7 +566,7 @@ function rememberRaw(key, rows) {
 
 const KITCHEN_STAGES = ['Cozinha', 'Aguardando Entrega', 'Saiu para entrega', 'Entregue', 'Finalizado', 'Cancelados']
 const ACTIVE_KITCHEN_STAGES = new Set(['Cozinha', 'Aguardando Entrega', 'Saiu para entrega'])
-const URGENT_KITCHEN_MINUTES = 20
+const URGENT_KITCHEN_MINUTES = 15
 
 function fortalezaTimestamp(value) {
   const raw = text(value)
@@ -584,6 +584,7 @@ function shortSaleCode(value) {
 function summarizeKitchen(rows) {
   const current = new Map()
   const stages = new Map()
+  const dailyCookingSeconds = new Map()
   const queue = []
   const now = Date.now()
 
@@ -592,18 +593,20 @@ function summarizeKitchen(rows) {
       .slice()
       .sort((a, b) => num(a.order) - num(b.order))
     const lastName = text(steps[steps.length - 1]?.desc_store_sale_status) || 'Sem status'
-    const lastStep = steps[steps.length - 1]
+    const firstStep = steps[0]
     const status = current.get(lastName) || { label: lastName, count: 0 }
     status.count += 1
     current.set(lastName, status)
 
     if (ACTIVE_KITCHEN_STAGES.has(lastName)) {
-      const enteredAt = fortalezaTimestamp(lastStep?.created_at)
+      const enteredAt = fortalezaTimestamp(firstStep?.created_at)
       const waitingMinutes = enteredAt === null ? null : Math.max(0, Math.floor((now - enteredAt) / 60000))
+      const saleType = num(row.id_sale_type)
       queue.push({
         code: shortSaleCode(row.id_sale),
+        channel: saleType === 1 ? 'delivery' : saleType === 3 ? 'mesa' : 'outros',
         status: lastName,
-        enteredAt: text(lastStep?.created_at) || null,
+        enteredAt: text(firstStep?.created_at) || null,
         waitingMinutes,
         urgent: typeof waitingMinutes === 'number' && waitingMinutes >= URGENT_KITCHEN_MINUTES,
       })
@@ -614,7 +617,19 @@ function summarizeKitchen(rows) {
       const stage = stages.get(name) || { label: name, count: 0, seconds: [] }
       stage.count += 1
       const seconds = Number(step.duration_time_seconds)
-      if (Number.isFinite(seconds) && seconds >= 0) stage.seconds.push(seconds)
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        stage.seconds.push(seconds)
+        if (name === 'Cozinha' && seconds > 0) {
+          const day = text(row.shift_date).slice(0, 10)
+            || text(row.created_at).slice(0, 10)
+            || text(step.created_at).slice(0, 10)
+          if (day) {
+            const values = dailyCookingSeconds.get(day) || []
+            values.push(seconds)
+            dailyCookingSeconds.set(day, values)
+          }
+        }
+      }
       stages.set(name, stage)
     }
   }
@@ -650,6 +665,9 @@ function summarizeKitchen(rows) {
     urgent: queue.filter((item) => item.urgent).length,
     urgentAfterMinutes: URGENT_KITCHEN_MINUTES,
     queue,
+    dailyKitchenMinutes: Object.fromEntries(
+      [...dailyCookingSeconds.entries()].map(([day, seconds]) => [day, minutes(seconds).averageMinutes]),
+    ),
     current: ordered(current, (item) => ({ label: item.label, count: item.count })),
     stages: ordered(stages, (item) => ({
       label: item.label,

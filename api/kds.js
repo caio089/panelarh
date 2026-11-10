@@ -1,5 +1,13 @@
 import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { saiposUnit } from '../server/saiposUnits.js'
+import { readKdsCache, saveKdsCache } from '../server/kdsCache.js'
+
+const SOURCE_REFRESH_MS = 60 * 1000
+
+function cacheIsFresh(payload, now = Date.now()) {
+  const fetchedAt = Date.parse(payload?.fetchedAt || '')
+  return Number.isFinite(fetchedAt) && now - fetchedAt < SOURCE_REFRESH_MS
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
@@ -8,12 +16,17 @@ export default async function handler(req, res) {
   const unitId = typeof req.query?.unidade === 'string' ? req.query.unidade.trim().toLowerCase() : ''
   const unit = saiposUnit(unitId)
   if (!unit) return res.status(404).json({ error: 'Unidade não encontrada.' })
+  const date = todayInFortaleza()
+  const cached = await readKdsCache(unit.id, date)
+  if (cached && cacheIsFresh(cached)) {
+    return res.status(200).json({ ...cached, cached: true, stale: false })
+  }
 
   const controller = new AbortController()
   req.on?.('close', () => controller.abort())
   try {
     const payload = await getSaiposReport({
-      date: todayInFortaleza(),
+      date,
       category: 'cozinha',
       period: 'dia',
       token: unit.token(),
@@ -23,7 +36,7 @@ export default async function handler(req, res) {
       cacheScope: unit.id,
     })
     const report = payload.report || {}
-    return res.status(200).json({
+    const response = {
       unit: unit.name,
       fetchedAt: payload.fetchedAt,
       active: report.active || 0,
@@ -31,11 +44,18 @@ export default async function handler(req, res) {
       waiting: report.waiting || 0,
       onTheWay: report.onTheWay || 0,
       urgent: report.urgent || 0,
-      urgentAfterMinutes: report.urgentAfterMinutes || 20,
-      queue: Array.isArray(report.queue) ? report.queue.slice(0, 16) : [],
-    })
+      urgentAfterMinutes: report.urgentAfterMinutes || 15,
+      queue: Array.isArray(report.queue) ? report.queue.slice(0, 30) : [],
+    }
+    await saveKdsCache(unit.id, date, response)
+    return res.status(200).json({ ...response, cached: false, stale: false })
   } catch (error) {
     if (controller.signal.aborted) return
-    return res.status(503).json({ error: error instanceof Error ? error.message : 'Não foi possível consultar o KDS agora.' })
+    const message = error instanceof Error ? error.message : 'Não foi possível consultar o KDS agora.'
+    if (cached) {
+      return res.status(200).json({ ...cached, cached: true, stale: true, warning: message })
+    }
+    res.setHeader('Retry-After', '120')
+    return res.status(503).json({ error: message })
   }
 }
