@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarDays, CalendarRange, Clock3, RefreshCw, Store, Truck, Trophy, UtensilsCrossed } from 'lucide-react'
+import { AlertTriangle, CalendarDays, CalendarRange, Clock3, RefreshCw, Store, Trophy } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
@@ -77,9 +77,15 @@ function pointsForPosition(position: number) {
 export function TvCompetitionPage() {
   const { unit: requestedUnit } = useParams()
   const { pathname } = useLocation()
-  const [params, setParams] = useSearchParams()
   const routeUnit = requestedUnit || pathname.split('/').filter(Boolean)[0] || ''
   const tvUnitId = TV_UNITS[routeUnit] ? routeUnit : null
+
+  if (tvUnitId) return <TvUnitDashboard unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} />
+  return <CompetitionDashboard />
+}
+
+function CompetitionDashboard() {
+  const [params, setParams] = useSearchParams()
   const today = todayInFortaleza()
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
@@ -327,8 +333,6 @@ export function TvCompetitionPage() {
           </div>
         </header>
 
-        {tvUnitId ? <TvUnitOperation unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} /> : null}
-
         <section className="flex flex-col justify-between gap-5 py-6 lg:flex-row lg:items-end lg:py-8">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#E97A61] sm:text-sm">Desafio entre unidades</p>
@@ -386,17 +390,20 @@ export function TvCompetitionPage() {
   )
 }
 
-function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: string }) {
+function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: string }) {
   const [data, setData] = useState<KdsPayload | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [metrics, setMetrics] = useState<Record<CompetitionPeriod, UnitScore[]>>({ dia: [], mes: [] })
+  const [period, setPeriod] = useState<CompetitionPeriod>('dia')
+  const [kdsError, setKdsError] = useState('')
+  const [metricsError, setMetricsError] = useState('')
+  const [updatedAt, setUpdatedAt] = useState(() => new Date())
+  const today = todayInFortaleza()
 
   useEffect(() => {
     let alive = true
     let timer: number | undefined
     const load = async () => {
       let nextRefreshMs = KDS_REFRESH_MS
-      setLoading(true)
       try {
         const response = await fetch(`/api/kds?unidade=${unitId}`, {
           cache: 'no-store',
@@ -405,16 +412,16 @@ function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: strin
         if (!response.ok) throw Object.assign(new Error(payload.error || 'Não foi possível atualizar o KDS.'), { status: response.status })
         if (!alive) return
         setData(payload)
-        setError('')
+        setKdsError(payload.warning || '')
+        setUpdatedAt(new Date(payload.fetchedAt))
         if (payload.stale) nextRefreshMs = KDS_RETRY_MS
       } catch (reason) {
         if (!alive) return
         const status = reason instanceof Error && 'status' in reason ? Number(reason.status) : 0
-        setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o KDS.')
+        setKdsError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o KDS.')
         if (status === 503) nextRefreshMs = KDS_RETRY_MS
       } finally {
         if (alive) {
-          setLoading(false)
           timer = window.setTimeout(() => { void load() }, nextRefreshMs)
         }
       }
@@ -426,55 +433,141 @@ function TvUnitOperation({ unitId, unitName }: { unitId: string; unitName: strin
     }
   }, [unitId])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setPeriod((current) => current === 'dia' ? 'mes' : 'dia'), AUTO_SLIDE_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const requests = (['dia', 'mes'] as CompetitionPeriod[]).flatMap((selectedPeriod) => [
+        fetch(`/api/competition?dia=${today}&periodo=${selectedPeriod}`, { cache: 'no-store' }),
+        fetch(`/api/competition?dia=${today}&periodo=${selectedPeriod}&dados=cozinha`, { cache: 'no-store' }),
+      ])
+      const results = await Promise.allSettled(requests)
+      if (!alive) return
+      let received = 0
+      for (const [index, result] of results.entries()) {
+        if (result.status !== 'fulfilled' || !result.value.ok) continue
+        const payload = await result.value.json() as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
+        if (!alive || !payload.units) continue
+        const selectedPeriod: CompetitionPeriod = index < 2 ? 'dia' : 'mes'
+        const kitchenRequest = index % 2 === 1
+        setMetrics((current) => {
+          const previous = current[selectedPeriod]
+          const byName = new Map(previous.map((unit) => [unit.name, unit]))
+          for (const unit of payload.units!) {
+            const existing = byName.get(unit.name)
+            byName.set(unit.name, {
+              name: unit.name,
+              orders: kitchenRequest ? existing?.orders ?? 0 : unit.orders,
+              kitchenMinutes: kitchenRequest ? unit.kitchenMinutes ?? null : existing?.kitchenMinutes ?? null,
+              accent: ACCENTS[unit.name] ?? '#EFE3C4',
+            })
+          }
+          return { ...current, [selectedPeriod]: [...byName.values()] }
+        })
+        if (payload.fetchedAt) setUpdatedAt(new Date(payload.fetchedAt))
+        received += 1
+      }
+      setMetricsError(received === 0 ? 'Não foi possível atualizar vendas e tempos.' : '')
+    }
+    void load()
+    const timer = window.setInterval(() => { void load() }, REFRESH_MS)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [today])
+
   const urgentOrders = data?.queue.filter((order) => order.urgent) ?? []
-  const deliveryOrders = data?.queue.filter((order) => !order.urgent && order.channel === 'delivery') ?? []
-  const tableOrders = data?.queue.filter((order) => !order.urgent && order.channel === 'mesa') ?? []
+  const activeOrders = data?.queue.filter((order) => !order.urgent) ?? []
+  const salesRanking = [...metrics[period]].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
+  const kitchenRanking = [...metrics[period]].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
+  const periodLabel = period === 'dia' ? 'Hoje' : 'Este mês'
 
   return (
-    <section className="mt-6 rounded-[28px] border border-white/10 bg-[#0D1731]/90 p-5 shadow-xl sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-5">
-        <div>
-          <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#80C997]"><Store size={17} /> Operação da unidade</p>
-          <h2 className="mt-2 font-display text-3xl sm:text-4xl">Fila do KDS · {unitName}</h2>
-          <p className="mt-2 text-sm text-white/55">Pedidos ainda não entregues após {data?.urgentAfterMinutes ?? 15} min aparecem em Urgentes · atualização a cada 30 s</p>
-        </div>
-      </div>
-
-      {error ? <div className="mt-4 rounded-xl border border-[#E15B3F]/35 bg-[#E15B3F]/10 px-4 py-3 text-sm text-[#FFB3A6]">{error}</div> : null}
-      {data ? (
-        <>
-          <div className="mt-5 grid gap-4 lg:grid-cols-3">
-            <KdsColumn title="Delivery" orders={deliveryOrders} icon={<Truck size={20} />} />
-            <KdsColumn title="Mesa" orders={tableOrders} icon={<UtensilsCrossed size={20} />} />
-            <KdsColumn title="Urgentes" orders={urgentOrders} icon={<AlertTriangle size={20} />} urgent />
+    <main className="h-[100dvh] overflow-hidden bg-[#090E20] p-3 text-[#F9F6EC] sm:p-4 lg:p-5">
+      <div className="pointer-events-none fixed -left-32 top-20 h-[32rem] w-[32rem] rounded-full bg-[#3151A7]/25 blur-[140px]" />
+      <div className="pointer-events-none fixed -right-24 -top-28 h-[28rem] w-[28rem] rounded-full bg-[#E15B3F]/20 blur-[130px]" />
+      <div className="relative mx-auto grid h-full max-w-[1800px] grid-rows-[auto_minmax(0,1fr)] gap-3 lg:gap-4">
+        <header className="flex min-h-12 items-center justify-between gap-4 border-b border-white/12 px-1 pb-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="font-display text-2xl tracking-tight text-[#EFE3C4] lg:text-3xl">Panela Velha</span>
+            <span className="h-7 w-px bg-white/20" />
+            <div className="min-w-0"><p className="truncate text-sm font-extrabold uppercase tracking-[0.16em]">Operação · {unitName}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">Atualizado {formatKdsTime(updatedAt.toISOString())}</p></div>
           </div>
-          <p className={`mt-4 text-right text-[11px] font-semibold uppercase tracking-[0.12em] ${data.stale ? 'text-[#F4B942]' : 'text-white/35'}`}>{loading ? 'Atualizando Saipos…' : data.stale ? `Saipos instável · último dado válido ${formatKdsTime(data.fetchedAt)}` : `Atualizado ${formatKdsTime(data.fetchedAt)}`}</p>
-        </>
-      ) : loading ? <p className="mt-6 text-sm text-white/55">Buscando pedidos da {unitName}…</p> : null}
-    </section>
+          <div className="flex items-center gap-2 rounded-full border border-[#6FE2A2]/25 bg-[#6FE2A2]/8 px-3 py-1.5 text-xs font-bold text-[#8DF0B5]"><span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" /> AO VIVO</div>
+        </header>
+
+        <section className="grid min-h-0 gap-3 lg:grid-cols-2 lg:grid-rows-2 lg:gap-4">
+          <TvPanel title="KDS agora" subtitle={`${data?.active ?? 0} pedidos ativos`} icon={<Store size={20} />}>
+            <div className="mb-2 grid grid-cols-3 gap-2">
+              <StatusPill label="Cozinha" value={data?.preparing ?? 0} />
+              <StatusPill label="Aguardando" value={data?.waiting ?? 0} />
+              <StatusPill label="Em entrega" value={data?.onTheWay ?? 0} />
+            </div>
+            <CompactOrderList orders={activeOrders} empty="Nenhum pedido na fila" />
+          </TvPanel>
+
+          <TvPanel title="Tempo médio" subtitle={`${periodLabel} · troca automática`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+            <CompactRanking units={kitchenRanking} type="kitchen" highlight={unitName} />
+          </TvPanel>
+
+          <TvPanel title="Vendas" subtitle={`${periodLabel} · troca automática`} icon={<Trophy size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+            <CompactRanking units={salesRanking} type="sales" highlight={unitName} />
+          </TvPanel>
+
+          <TvPanel title="Pedidos urgentes" subtitle={`Há ${data?.urgentAfterMinutes ?? 15} min ou mais`} icon={<AlertTriangle size={20} />} urgent badge={String(urgentOrders.length)}>
+            <CompactOrderList orders={urgentOrders} empty="Nenhum pedido urgente" urgent />
+          </TvPanel>
+        </section>
+      </div>
+      {(kdsError || metricsError) ? <div className="fixed bottom-2 left-1/2 z-20 max-w-[90vw] -translate-x-1/2 rounded-full border border-[#E15B3F]/35 bg-[#321A27]/95 px-4 py-1.5 text-center text-xs text-[#FFB3A6] shadow-xl">{kdsError || metricsError}</div> : null}
+    </main>
   )
 }
 
-function KdsColumn({ title, orders, icon, urgent = false }: { title: string; orders: KdsOrder[]; icon: ReactNode; urgent?: boolean }) {
-  return (
-    <section className={`min-h-56 rounded-2xl border p-4 ${urgent ? 'border-[#E15B3F]/45 bg-[#E15B3F]/8' : 'border-white/10 bg-white/[0.04]'}`}>
-      <div className={`flex items-center justify-between border-b pb-3 ${urgent ? 'border-[#E15B3F]/30 text-[#FF8E78]' : 'border-white/10 text-[#EFE3C4]'}`}>
-        <div className="flex items-center gap-2">{icon}<h3 className="font-display text-2xl">{title}</h3></div>
-        <span className={`flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-extrabold ${urgent ? 'bg-[#E15B3F] text-white' : 'bg-white/10 text-white/70'}`}>{orders.length}</span>
-      </div>
-      {orders.length === 0 ? <p className="py-10 text-center text-sm text-white/40">Nenhum pedido</p> : (
-        <ol className="mt-3 space-y-3">
-          {orders.map((order, index) => <li key={`${order.code}-${index}`} className={`rounded-xl border px-4 py-3 ${urgent ? 'border-[#E15B3F]/45 bg-[#E15B3F]/12' : 'border-white/10 bg-[#090E20]/65'}`}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/45">Pedido {order.code}</span>
-              <strong className={`font-display text-2xl tabular-nums ${urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes} min` : '—'}</strong>
-            </div>
-            <p className="mt-1 text-sm text-white/65">{kdsStatusLabel(order.status)}</p>
-          </li>)}
-        </ol>
-      )}
-    </section>
-  )
+function TvPanel({ title, subtitle, icon, badge, urgent = false, children }: { title: string; subtitle: string; icon: ReactNode; badge?: string; urgent?: boolean; children: ReactNode }) {
+  return <article className={`flex min-h-0 flex-col overflow-hidden rounded-2xl border p-3 shadow-xl lg:rounded-[24px] lg:p-4 ${urgent ? 'border-[#E15B3F]/45 bg-[#2A1625]/90' : 'border-white/10 bg-[#0D1731]/90'}`}>
+    <div className={`mb-2 flex items-center justify-between gap-3 border-b pb-2 ${urgent ? 'border-[#E15B3F]/30' : 'border-white/10'}`}>
+      <div className="flex min-w-0 items-center gap-2.5"><span className={`rounded-lg p-2 ${urgent ? 'bg-[#E15B3F]/18 text-[#FF8E78]' : 'bg-white/8 text-[#EFE3C4]'}`}>{icon}</span><div className="min-w-0"><h2 className="truncate font-display text-[clamp(1.35rem,2.1vw,2rem)] leading-none">{title}</h2><p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">{subtitle}</p></div></div>
+      {badge ? <span className={`flex min-w-10 items-center justify-center rounded-full px-2.5 py-1 text-xs font-extrabold ${urgent ? 'bg-[#E15B3F] text-white' : 'bg-[#F4B942] text-[#18142A]'}`}>{badge}</span> : null}
+    </div>
+    <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+  </article>
+}
+
+function StatusPill({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-lg bg-white/[0.055] px-2 py-1.5 text-center"><strong className="font-display text-xl text-[#F4B942]">{value}</strong><p className="truncate text-[9px] font-bold uppercase tracking-[0.08em] text-white/45">{label}</p></div>
+}
+
+function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[]; empty: string; urgent?: boolean }) {
+  if (orders.length === 0) return <div className="flex h-full min-h-16 items-center justify-center text-sm font-semibold text-white/35">{empty}</div>
+  return <ol className="grid content-start gap-1.5 sm:grid-cols-2">
+    {orders.slice(0, 8).map((order, index) => <li key={`${order.code}-${index}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${urgent ? 'border-[#E15B3F]/35 bg-[#E15B3F]/10' : 'border-white/8 bg-[#090E20]/55'}`}>
+      <div className="min-w-0"><p className="truncate text-xs font-extrabold">#{order.code}</p><p className="truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{kdsChannelLabel(order.channel)} · {kdsStatusLabel(order.status)}</p></div>
+      <strong className={`shrink-0 font-display text-lg tabular-nums ${urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes}m` : '—'}</strong>
+    </li>)}
+  </ol>
+}
+
+function CompactRanking({ units, type, highlight }: { units: UnitScore[]; type: 'sales' | 'kitchen'; highlight: string }) {
+  if (units.length === 0) return <div className="flex h-full items-center justify-center text-sm font-semibold text-white/35">Carregando indicadores…</div>
+  return <ol className="grid h-full content-center gap-2">
+    {units.map((unit, index) => <li key={unit.name} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-3 py-2 ${unit.name === highlight ? 'border-[#F4B942]/45 bg-[#F4B942]/10' : 'border-white/8 bg-white/[0.035]'}`}>
+      <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${index === 0 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/10 text-white/60'}`}>{index + 1}</span>
+      <div className="min-w-0"><p className="truncate text-sm font-extrabold lg:text-base">{unit.name}</p>{unit.name === highlight ? <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-[#F4B942]">Esta unidade</p> : null}</div>
+      <strong className="font-display text-[clamp(1.3rem,2vw,2rem)] tabular-nums">{type === 'sales' ? unit.orders : typeof unit.kitchenMinutes === 'number' ? `${unit.kitchenMinutes.toLocaleString('pt-BR')} min` : '—'}</strong>
+    </li>)}
+  </ol>
+}
+
+function kdsChannelLabel(channel: KdsOrder['channel']) {
+  if (channel === 'delivery') return 'Delivery'
+  if (channel === 'mesa') return 'Mesa'
+  return 'Balcão/outros'
 }
 
 function kdsStatusLabel(status: string) {

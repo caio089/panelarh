@@ -2,7 +2,9 @@ import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { saiposUnit } from '../server/saiposUnits.js'
 import { readKdsCache, saveKdsCache } from '../server/kdsCache.js'
 
-const SOURCE_REFRESH_MS = 60 * 1000
+// A TV consulta a cada 30 s. Uma janela um pouco menor garante que cada
+// consulta programada realmente busque o estado atual na Saipos.
+const SOURCE_REFRESH_MS = 25 * 1000
 
 function cacheIsFresh(payload, now = Date.now()) {
   const fetchedAt = Date.parse(payload?.fetchedAt || '')
