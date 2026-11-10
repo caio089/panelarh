@@ -35,6 +35,7 @@ export default function App() {
               <Route path="/vagas/:id" element={<JobDetailPage />} />
               <Route path="/vagas/:id/candidatar" element={<PublicApplyPage />} />
               <Route path="/tv/competicao" element={<TvCompetitionPage />} />
+              <Route path="/tv/competicao/:unit" element={<TvCompetitionPage />} />
               <Route path="/tv/:unit" element={<TvCompetitionPage />} />
               <Route path="/dirceu" element={<TvCompetitionPage />} />
               <Route path="/promorar" element={<TvCompetitionPage />} />
