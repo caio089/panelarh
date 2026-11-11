@@ -492,7 +492,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
   const periodLabel = period === 'dia' ? 'Hoje' : 'Este mês'
 
   return (
-    <main className="h-[100dvh] overflow-hidden bg-[#090E20] p-3 text-[#F9F6EC] sm:p-4 lg:p-5">
+    <main className="h-screen h-[100dvh] overflow-hidden bg-[#090E20] p-3 text-[#F9F6EC] sm:p-4 lg:p-5">
       <div className="pointer-events-none fixed -left-32 top-20 h-[32rem] w-[32rem] rounded-full bg-[#3151A7]/25 blur-[140px]" />
       <div className="pointer-events-none fixed -right-24 -top-28 h-[28rem] w-[28rem] rounded-full bg-[#E15B3F]/20 blur-[130px]" />
       <div className="relative mx-auto grid h-full max-w-[1800px] grid-rows-[auto_minmax(0,1fr)] gap-3 lg:gap-4">
@@ -508,7 +508,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
           </div>
         </header>
 
-        <section className="grid min-h-0 grid-cols-2 grid-rows-2 gap-3 lg:gap-4">
+        <section className="grid h-full min-h-0 grid-cols-2 gap-3 overflow-hidden lg:gap-4" style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}>
           <TvPanel title="KDS agora" subtitle={`${data?.active ?? 0} pedidos ativos`} icon={<Store size={20} />}>
             <div className="mb-2 grid grid-cols-3 gap-2">
               <StatusPill label="Cozinha" value={data?.preparing ?? 0} />
@@ -552,8 +552,8 @@ function StatusPill({ label, value }: { label: string; value: number }) {
 
 function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[]; empty: string; urgent?: boolean }) {
   if (orders.length === 0) return <div className="flex h-full min-h-16 items-center justify-center text-sm font-semibold text-white/35">{empty}</div>
-  return <ol className="grid content-start gap-1.5 sm:grid-cols-2">
-    {orders.slice(0, 8).map((order, index) => <li key={`${order.code}-${index}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${urgent ? 'border-[#E15B3F]/35 bg-[#E15B3F]/10' : 'border-white/8 bg-[#090E20]/55'}`}>
+  return <ol className="grid grid-cols-2 content-start gap-1">
+    {orders.slice(0, 8).map((order, index) => <li key={`${order.code}-${index}`} className={`flex min-h-0 items-center justify-between gap-1.5 rounded-lg border px-2 py-1 ${urgent ? 'border-[#E15B3F]/35 bg-[#E15B3F]/10' : 'border-white/8 bg-[#090E20]/55'}`}>
       <div className="min-w-0"><p className="truncate text-xs font-extrabold">#{order.code}</p><p className="truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{kdsChannelLabel(order.channel)} · {kdsStatusLabel(order.status)}</p></div>
       <strong className={`shrink-0 font-display text-lg tabular-nums ${urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes}m` : '—'}</strong>
     </li>)}
