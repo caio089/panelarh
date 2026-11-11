@@ -1,6 +1,6 @@
 import { AlertTriangle, CalendarDays, CalendarRange, Clock3, RefreshCw, Store, Trophy } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
 type UnitScore = {
@@ -86,6 +86,8 @@ export function TvCompetitionPage() {
 
 function CompetitionDashboard() {
   const [params, setParams] = useSearchParams()
+  const originUnit = params.get('origem')
+  const operationPath = originUnit && TV_UNITS[originUnit] ? `/${originUnit}` : null
   const today = todayInFortaleza()
   const currentCompetitionDay = competitionDayInFortaleza()
   const rawDate = params.get('dia')
@@ -327,9 +329,12 @@ function CompetitionDashboard() {
             <span className="hidden h-8 w-px bg-white/20 sm:block" />
             <p className="hidden text-sm font-bold uppercase tracking-[0.22em] text-[#EFE3C4]/80 sm:block">Liga Panela Velha</p>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-[#EFE3C4]/20 bg-white/5 px-3 py-2 text-xs font-semibold text-[#EFE3C4] sm:px-4 sm:text-sm">
-            <span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" />
-            AO VIVO
+          <div className="flex items-center gap-2">
+            {operationPath ? <Link to={operationPath} className="rounded-full border border-[#F4B942]/35 bg-[#F4B942]/10 px-3 py-2 text-xs font-extrabold uppercase tracking-[0.08em] text-[#F4B942]">Operação</Link> : null}
+            <div className="flex items-center gap-2 rounded-full border border-[#EFE3C4]/20 bg-white/5 px-3 py-2 text-xs font-semibold text-[#EFE3C4] sm:px-4 sm:text-sm">
+              <span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" />
+              AO VIVO
+            </div>
           </div>
         </header>
 
@@ -360,7 +365,7 @@ function CompetitionDashboard() {
         </section>
 
         {view === 'ranking' ? <CompetitionRankingPanel scores={scores} salesRanking={salesRanking} kitchenRanking={kitchenRanking} periodLabel={periodLabel} /> : (
-          <section className="grid min-h-0 flex-1 gap-5 lg:grid-cols-2">
+          <section className="grid min-h-0 flex-1 grid-cols-2 gap-5">
             <RankingCard
               title={period === 'mes' ? 'Vendas no mês' : 'Vendas em tempo real'}
               subtitle={`Ranking de vendas do ${periodLabel}`}
@@ -497,7 +502,10 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
             <span className="h-7 w-px bg-white/20" />
             <div className="min-w-0"><p className="truncate text-sm font-extrabold uppercase tracking-[0.16em]">Operação · {unitName}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">Atualizado {formatKdsTime(updatedAt.toISOString())}</p></div>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-[#6FE2A2]/25 bg-[#6FE2A2]/8 px-3 py-1.5 text-xs font-bold text-[#8DF0B5]"><span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" /> AO VIVO</div>
+          <div className="flex items-center gap-2">
+            <Link to={`/tv/competicao?aba=ranking&periodo=mes&origem=${unitId}`} className="inline-flex items-center gap-1.5 rounded-full border border-[#F4B942]/35 bg-[#F4B942]/10 px-3 py-1.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#F4B942]"><Trophy size={14} /> Ranking</Link>
+            <div className="flex items-center gap-2 rounded-full border border-[#6FE2A2]/25 bg-[#6FE2A2]/8 px-3 py-1.5 text-xs font-bold text-[#8DF0B5]"><span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" /> AO VIVO</div>
+          </div>
         </header>
 
         <section className="grid min-h-0 grid-cols-2 grid-rows-2 gap-3 lg:gap-4">
@@ -601,7 +609,7 @@ function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodL
         </ol>
       </article>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+      <div className="mt-5 grid grid-cols-2 gap-5">
         <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Quantidade por unidade" icon={<Trophy size={20} />} units={salesRanking} />
         <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Tempo médio de preparo" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
       </div>
