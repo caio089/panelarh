@@ -1,4 +1,4 @@
-import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
+import { currentShiftDateInFortaleza, getSaiposKdsOrderDetails, getSaiposReport } from '../server/saiposDirceu.js'
 import { saiposUnit } from '../server/saiposUnits.js'
 import { readKdsCache, saveKdsCache } from '../server/kdsCache.js'
 import { waitUntil } from '@vercel/functions'
@@ -19,26 +19,30 @@ export default async function handler(req, res) {
   const unitId = typeof req.query?.unidade === 'string' ? req.query.unidade.trim().toLowerCase() : ''
   const unit = saiposUnit(unitId)
   if (!unit) return res.status(404).json({ error: 'Unidade não encontrada.' })
-  const date = todayInFortaleza()
+  const date = currentShiftDateInFortaleza()
   const cached = await readKdsCache(unit.id, date)
   if (cached && cacheIsFresh(cached)) {
     return res.status(200).json({ ...cached, cached: true, stale: false })
   }
 
   const loadFresh = async (signal) => {
-    const payload = await getSaiposReport({
-      date,
-      category: 'cozinha',
-      period: 'dia',
-      token: unit.token(),
-      signal,
-      fresh: true,
-      unit: unit.name,
-      cacheScope: unit.id,
-    })
+    const [payload, orderDetails] = await Promise.all([
+      getSaiposReport({
+        date,
+        category: 'cozinha',
+        period: 'dia',
+        token: unit.token(),
+        signal,
+        fresh: true,
+        unit: unit.name,
+        cacheScope: unit.id,
+      }),
+      getSaiposKdsOrderDetails({ date, token: unit.token(), signal, fresh: true, cacheScope: unit.id }),
+    ])
     const report = payload.report || {}
     const response = {
       unit: unit.name,
+      date,
       fetchedAt: payload.fetchedAt,
       active: report.active || 0,
       preparing: report.preparing || 0,
@@ -46,7 +50,9 @@ export default async function handler(req, res) {
       onTheWay: report.onTheWay || 0,
       urgent: report.urgent || 0,
       urgentAfterMinutes: report.urgentAfterMinutes || 15,
-      queue: Array.isArray(report.queue) ? report.queue.slice(0, 30) : [],
+      queue: Array.isArray(report.queue)
+        ? report.queue.slice(0, 30).map((order) => ({ ...order, ...orderDetails.get(order.code) }))
+        : [],
     }
     await saveKdsCache(unit.id, date, response)
     return response

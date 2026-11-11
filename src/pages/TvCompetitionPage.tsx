@@ -22,6 +22,7 @@ type MonthlyRankingPayload = {
 type KdsOrder = {
   code: string
   channel: 'delivery' | 'mesa' | 'outros'
+  label?: string
   status: string
   enteredAt: string | null
   waitingMinutes: number | null
@@ -30,6 +31,7 @@ type KdsOrder = {
 
 type KdsPayload = {
   unit: string
+  date: string
   fetchedAt: string
   active: number
   preparing: number
@@ -500,7 +502,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
           <div className="flex min-w-0 items-center gap-3">
             <span className="font-display text-2xl tracking-tight text-[#EFE3C4] lg:text-3xl">Panela Velha</span>
             <span className="h-7 w-px bg-white/20" />
-            <div className="min-w-0"><p className="truncate text-sm font-extrabold uppercase tracking-[0.16em]">Operação · {unitName}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">Atualizado {formatKdsTime(updatedAt.toISOString())}</p></div>
+            <div className="min-w-0"><p className="truncate text-sm font-extrabold uppercase tracking-[0.16em]">Operação · {unitName}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">Turno {data?.date ? data.date.split('-').reverse().slice(0, 2).join('/') : '—'} · Atualizado {formatKdsTime(updatedAt.toISOString())}</p></div>
           </div>
           <div className="flex items-center gap-2">
             <Link to={`/tv/competicao?aba=ranking&periodo=mes&origem=${unitId}`} className="inline-flex items-center gap-1.5 rounded-full border border-[#F4B942]/35 bg-[#F4B942]/10 px-3 py-1.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#F4B942]"><Trophy size={14} /> Ranking</Link>
@@ -554,7 +556,7 @@ function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[
   if (orders.length === 0) return <div className="flex h-full min-h-16 items-center justify-center text-sm font-semibold text-white/35">{empty}</div>
   return <ol className="grid grid-cols-2 content-start gap-1">
     {orders.slice(0, 8).map((order, index) => <li key={`${order.code}-${index}`} className={`flex min-h-0 items-center justify-between gap-1.5 rounded-lg border px-2 py-1 ${urgent ? 'border-[#E15B3F]/35 bg-[#E15B3F]/10' : 'border-white/8 bg-[#090E20]/55'}`}>
-      <div className="min-w-0"><p className="truncate text-xs font-extrabold">#{order.code}</p><p className="truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{kdsChannelLabel(order.channel)} · {kdsStatusLabel(order.status)}</p></div>
+      <div className="min-w-0"><p className="truncate text-xs font-extrabold">{order.label || `#${order.code}`}</p><p className="truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{kdsChannelLabel(order.channel)} · {kdsStatusLabel(order.status)}</p></div>
       <strong className={`shrink-0 font-display text-lg tabular-nums ${urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes}m` : '—'}</strong>
     </li>)}
   </ol>

@@ -3,7 +3,7 @@ import { getCache } from '@vercel/functions'
 const cache = getCache({ namespace: 'panela-velha-kds' })
 
 function key(unitId, date) {
-  return `v2:${unitId}:${date}`
+  return `v3:${unitId}:${date}`
 }
 
 export async function readKdsCache(unitId, date) {

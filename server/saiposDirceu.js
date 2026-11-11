@@ -48,6 +48,20 @@ export function todayInFortaleza(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now)
 }
 
+/** O KDS acompanha o turno noturno da loja, inclusive depois da meia-noite. */
+export function currentShiftDateInFortaleza(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+  const today = todayInFortaleza(now)
+  return hour * 60 + minute >= 17 * 60 + 30 ? today : shiftIsoDate(today, -1)
+}
+
 export function shiftIsoDate(iso, delta) {
   const [year, month, day] = iso.split('-').map(Number)
   const date = new Date(Date.UTC(year, month - 1, day))
@@ -599,14 +613,16 @@ function summarizeKitchen(rows) {
     current.set(lastName, status)
 
     if (ACTIVE_KITCHEN_STAGES.has(lastName)) {
-      const enteredAt = fortalezaTimestamp(firstStep?.created_at)
+      const kitchenStep = steps.find((step) => text(step.desc_store_sale_status) === 'Cozinha')
+        || steps.find((step) => ACTIVE_KITCHEN_STAGES.has(text(step.desc_store_sale_status)))
+        || firstStep
+      const enteredAt = fortalezaTimestamp(kitchenStep?.created_at)
       const waitingMinutes = enteredAt === null ? null : Math.max(0, Math.floor((now - enteredAt) / 60000))
-      const saleType = num(row.id_sale_type)
       queue.push({
         code: shortSaleCode(row.id_sale),
-        channel: saleType === 1 ? 'delivery' : saleType === 3 ? 'mesa' : 'outros',
+        channel: 'outros',
         status: lastName,
-        enteredAt: text(firstStep?.created_at) || null,
+        enteredAt: text(kitchenStep?.created_at) || null,
         waitingMinutes,
         urgent: typeof waitingMinutes === 'number' && waitingMinutes >= URGENT_KITCHEN_MINUTES,
       })
@@ -859,6 +875,33 @@ export async function getSaiposReport({ date, category, token, signal, period = 
   }
   if (!latest) throw new Error('A Saipos não devolveu dados para esta consulta.')
   return latest
+}
+
+/**
+ * Cruza a fila de status com as vendas do turno. O endpoint de histórico não
+ * devolve de forma confiável o tipo de atendimento nem o número visível.
+ */
+export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+  const rows = await loadOneDay(CATEGORIES.faturamento, date, token, signal, fresh, cacheScope)
+  return new Map(rows.map((row) => {
+    const code = shortSaleCode(row.id_sale)
+    const saleType = num(row.id_sale_type)
+    const saleNumber = label(row.sale_number)
+    const partner = row.partner_sale && typeof row.partner_sale === 'object' ? row.partner_sale : null
+    const partnerNumber = label(partner?.cod_sale2)
+    const ticket = row.ticket && typeof row.ticket === 'object'
+      ? label(row.ticket.number) || label(row.ticket.service_ticket_number)
+      : label(row.ticket)
+
+    if (saleType === 1) {
+      const number = saleNumber || partnerNumber || code
+      return [code, { channel: 'delivery', label: `#${number}` }]
+    }
+    if (saleType === 3) return [code, { channel: 'mesa', label: 'Mesa' }]
+    if (saleType === 2) return [code, { channel: 'outros', label: saleNumber ? `Balcão #${saleNumber}` : 'Balcão' }]
+    if (saleType === 4) return [code, { channel: 'outros', label: ticket ? `Ficha #${ticket}` : 'Ficha' }]
+    return [code, { channel: 'outros', label: `#${code}` }]
+  }))
 }
 
 /**
