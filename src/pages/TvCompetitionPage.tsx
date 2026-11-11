@@ -414,7 +414,6 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
         setData(payload)
         setKdsError(payload.warning || '')
         setUpdatedAt(new Date(payload.fetchedAt))
-        if (payload.stale) nextRefreshMs = KDS_RETRY_MS
       } catch (reason) {
         if (!alive) return
         const status = reason instanceof Error && 'status' in reason ? Number(reason.status) : 0
@@ -482,7 +481,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
   }, [today])
 
   const urgentOrders = data?.queue.filter((order) => order.urgent) ?? []
-  const activeOrders = data?.queue.filter((order) => !order.urgent) ?? []
+  const activeOrders = data?.queue ?? []
   const salesRanking = [...metrics[period]].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
   const kitchenRanking = [...metrics[period]].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
   const periodLabel = period === 'dia' ? 'Hoje' : 'Este mês'
@@ -501,7 +500,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
           <div className="flex items-center gap-2 rounded-full border border-[#6FE2A2]/25 bg-[#6FE2A2]/8 px-3 py-1.5 text-xs font-bold text-[#8DF0B5]"><span className="h-2 w-2 rounded-full bg-[#6FE2A2] shadow-[0_0_12px_#6FE2A2]" /> AO VIVO</div>
         </header>
 
-        <section className="grid min-h-0 gap-3 lg:grid-cols-2 lg:grid-rows-2 lg:gap-4">
+        <section className="grid min-h-0 grid-cols-2 grid-rows-2 gap-3 lg:gap-4">
           <TvPanel title="KDS agora" subtitle={`${data?.active ?? 0} pedidos ativos`} icon={<Store size={20} />}>
             <div className="mb-2 grid grid-cols-3 gap-2">
               <StatusPill label="Cozinha" value={data?.preparing ?? 0} />

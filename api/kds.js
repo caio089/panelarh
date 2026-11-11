@@ -1,6 +1,7 @@
 import { getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { saiposUnit } from '../server/saiposUnits.js'
 import { readKdsCache, saveKdsCache } from '../server/kdsCache.js'
+import { waitUntil } from '@vercel/functions'
 
 // A TV consulta a cada 30 s. Uma janela um pouco menor garante que cada
 // consulta programada realmente busque o estado atual na Saipos.
@@ -24,15 +25,13 @@ export default async function handler(req, res) {
     return res.status(200).json({ ...cached, cached: true, stale: false })
   }
 
-  const controller = new AbortController()
-  req.on?.('close', () => controller.abort())
-  try {
+  const loadFresh = async (signal) => {
     const payload = await getSaiposReport({
       date,
       category: 'cozinha',
       period: 'dia',
       token: unit.token(),
-      signal: controller.signal,
+      signal,
       fresh: true,
       unit: unit.name,
       cacheScope: unit.id,
@@ -50,13 +49,25 @@ export default async function handler(req, res) {
       queue: Array.isArray(report.queue) ? report.queue.slice(0, 30) : [],
     }
     await saveKdsCache(unit.id, date, response)
+    return response
+  }
+
+  // A consulta completa pode percorrer muitas páginas da Saipos. Se já existe
+  // um dado válido, a TV o recebe imediatamente enquanto o refresh acontece
+  // em segundo plano; no ciclo seguinte ela já recebe o resultado novo.
+  if (cached) {
+    waitUntil(loadFresh(new AbortController().signal).catch(() => undefined))
+    return res.status(200).json({ ...cached, cached: true, stale: true })
+  }
+
+  const controller = new AbortController()
+  req.on?.('close', () => controller.abort())
+  try {
+    const response = await loadFresh(controller.signal)
     return res.status(200).json({ ...response, cached: false, stale: false })
   } catch (error) {
     if (controller.signal.aborted) return
     const message = error instanceof Error ? error.message : 'Não foi possível consultar o KDS agora.'
-    if (cached) {
-      return res.status(200).json({ ...cached, cached: true, stale: true, warning: message })
-    }
     res.setHeader('Retry-After', '120')
     return res.status(503).json({ error: message })
   }
