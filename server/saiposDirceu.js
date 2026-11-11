@@ -44,6 +44,9 @@ const SALE_TYPES = {
   4: 'Ficha',
 }
 
+/** Competição: entrega e salão. Balcão (2) e ficha (4) ficam de fora dos dois lados. */
+const COMPETITION_SALE_TYPES = new Set([1, 3])
+
 export function todayInFortaleza(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now)
 }
@@ -256,6 +259,57 @@ function saleMoney(row) {
 
 function isCanceledSale(row) {
   return row.canceled === 'Y' || row.canceled === true
+}
+
+function isCompetitionSale(row) {
+  return COMPETITION_SALE_TYPES.has(num(row.id_sale_type)) && !isCanceledSale(row)
+}
+
+function saleKey(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return text(value)
+}
+
+/** Média e mediana em minutos. Cada item da lista é o tempo de uma venda. */
+function durationStats(seconds) {
+  const timed = seconds.filter((value) => value > 0)
+  if (timed.length === 0) return { averageMinutes: null, medianMinutes: null }
+  const sorted = timed.slice().sort((a, b) => a - b)
+  const mean = timed.reduce((sum, value) => sum + value, 0) / timed.length
+  return {
+    averageMinutes: Math.round((mean / 60) * 10) / 10,
+    medianMinutes: Math.round((sorted[Math.floor(sorted.length / 2)] / 60) * 10) / 10,
+  }
+}
+
+/**
+ * Soma o tempo no status Cozinha. Uma venda conta uma vez.
+ * Etapa ainda aberta (duração zero) e cancelamento não entram na média.
+ */
+function competitionKitchenSeconds(row) {
+  const steps = (Array.isArray(row.histories) ? row.histories : [])
+    .slice()
+    .sort((a, b) => num(a.order) - num(b.order))
+  const lastName = text(steps[steps.length - 1]?.desc_store_sale_status)
+  if (/cancel/i.test(lastName)) return null
+  let seconds = 0
+  let timed = false
+  for (const step of steps) {
+    if (text(step.desc_store_sale_status) !== 'Cozinha') continue
+    const value = Number(step.duration_time_seconds)
+    if (!Number.isFinite(value) || value <= 0) continue
+    seconds += value
+    timed = true
+  }
+  return timed ? seconds : null
+}
+
+/** Quantidade de entrega + salão já sem canceladas. O relatório operacional continua com todos os canais. */
+export function competitionOrderCount(report) {
+  const types = Array.isArray(report?.byType) ? report.byType : []
+  return types.reduce((sum, item) => (
+    COMPETITION_SALE_TYPES.has(num(item.id)) ? sum + num(item.count) : sum
+  ), 0)
 }
 
 function clock(value) {
@@ -655,17 +709,6 @@ function summarizeKitchen(rows) {
     ...KITCHEN_STAGES.filter((label) => map.has(label)).map((label) => mapItem(map.get(label))),
     ...[...map.values()].filter((item) => !KITCHEN_STAGES.includes(item.label)).map(mapItem),
   ]
-  const minutes = (seconds) => {
-    const timed = seconds.filter((value) => value > 0)
-    if (timed.length === 0) return { averageMinutes: null, medianMinutes: null }
-    const sorted = timed.slice().sort((a, b) => a - b)
-    const mean = timed.reduce((sum, value) => sum + value, 0) / timed.length
-    return {
-      averageMinutes: Math.round((mean / 60) * 10) / 10,
-      medianMinutes: Math.round((sorted[Math.floor(sorted.length / 2)] / 60) * 10) / 10,
-    }
-  }
-
   const preparing = countOf('Cozinha')
   const waiting = countOf('Aguardando Entrega')
   const onTheWay = countOf('Saiu para entrega')
@@ -682,13 +725,13 @@ function summarizeKitchen(rows) {
     urgentAfterMinutes: URGENT_KITCHEN_MINUTES,
     queue,
     dailyKitchenMinutes: Object.fromEntries(
-      [...dailyCookingSeconds.entries()].map(([day, seconds]) => [day, minutes(seconds).averageMinutes]),
+      [...dailyCookingSeconds.entries()].map(([day, seconds]) => [day, durationStats(seconds).averageMinutes]),
     ),
     current: ordered(current, (item) => ({ label: item.label, count: item.count })),
     stages: ordered(stages, (item) => ({
       label: item.label,
       count: item.count,
-      ...minutes(item.seconds),
+      ...durationStats(item.seconds),
     })),
   }
 }
@@ -877,9 +920,28 @@ export async function getSaiposReport({ date, category, token, signal, period = 
   return latest
 }
 
+/** Número da mesa quando a Saipos envia o texto. O id interno da mesa não é o número da casa. */
+function visibleTableNumber(row) {
+  const table = row.table_order && typeof row.table_order === 'object' ? row.table_order : {}
+  const direct = [
+    table.desc_store_table,
+    table.desc_table,
+    table.number,
+    table.table_number,
+    table.cod_table,
+    table.integration_code,
+  ].map((value) => label(value)).find((value) => value && value !== '0')
+  if (direct) return direct.replace(/^mesa\s*/i, '')
+  const description = text(row.desc_sale)
+  const named = description.match(/^(?:mesa|comanda)\s*(\d{1,4})$/i)
+  if (named) return named[1]
+  if (/^\d{1,4}$/.test(description)) return description
+  return ''
+}
+
 /**
  * Cruza a fila de status com as vendas do turno. O endpoint de histórico não
- * devolve de forma confiável o tipo de atendimento nem o número visível.
+ * devolve o tipo de atendimento nem o número visível.
  */
 export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = false, cacheScope = 'dirceu' }) {
   const rows = await loadOneDay(CATEGORIES.faturamento, date, token, signal, fresh, cacheScope)
@@ -896,10 +958,18 @@ export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = fa
       : label(row.ticket)
 
     if (saleType === 1) {
-      const number = saleNumber || partnerNumber || code
-      return [code, { channel: 'delivery', label: `#${number}`, include }]
+      const number = saleNumber || partnerNumber
+      return [code, {
+        channel: 'delivery',
+        label: number ? `#${number}` : '#',
+        reference: '',
+        include,
+      }]
     }
-    if (saleType === 3) return [code, { channel: 'mesa', label: 'Mesa', include }]
+    if (saleType === 3) {
+      const tableNumber = visibleTableNumber(row)
+      return [code, { channel: 'mesa', label: tableNumber ? `Mesa ${tableNumber}` : 'Mesa', reference: '', include }]
+    }
     if (saleType === 2) return [code, { channel: 'outros', label: saleNumber ? `Balcão #${saleNumber}` : 'Balcão', include }]
     if (saleType === 4) return [code, { channel: 'outros', label: ticket ? `Ficha #${ticket}` : 'Ficha', include }]
     return [code, { channel: 'outros', label: `#${code}`, include }]
@@ -907,38 +977,61 @@ export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = fa
 }
 
 /**
- * Conta somente as vendas válidas de cada dia. A consulta do intervalo inteiro
- * evita fazer uma requisição por dia quando o ranking mensal é aberto.
+ * Vendas e tempo da competição no mesmo recorte: entrega e salão, sem canceladas.
+ * O histórico de status não traz o tipo da venda, então o tempo só entra se o
+ * id_sale existir numa venda de mesa ou delivery. Cada venda pesa uma vez.
+ * A consulta é por dia porque a Saipos recusa um intervalo maior que 15 dias.
  */
-export async function getSaiposDailySalesCounts({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+export async function getSaiposCompetitionMetrics({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
   if (!isIsoDate(start) || !isIsoDate(end) || start > end) throw new Error('Informe um intervalo de datas válido.')
   if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
 
-  const spec = CATEGORIES.faturamento
-  const cacheKey = `${cacheScope}:${spec.path}:${spec.filter}:${start}:${end}:daily-counts`
-  const cached = fresh ? null : rawCache.get(cacheKey)
-  const rows = cached || []
-
-  if (!cached) {
-    for await (const page of saiposPages(
-      spec.path,
-      { p_date_column_filter: spec.filter, ...dayRange(start, end) },
-      token,
-      signal,
-      12,
-      PAGE_SIZE,
-    )) {
-      rows.push(...page.batch)
-      if (page.last) break
-    }
-    rememberRaw(cacheKey, rows)
-  }
+  const days = eachDay(start, end)
+  const loaded = await Promise.all(days.map(async (day) => {
+    const [sales, histories] = await Promise.all([
+      loadOneDay(CATEGORIES.faturamento, day, token, signal, fresh, cacheScope),
+      loadOneDay(CATEGORIES.cozinha, day, token, signal, fresh, cacheScope),
+    ])
+    return { day, sales, histories }
+  }))
 
   const counts = new Map()
-  for (const row of rows) {
-    if (isCanceledSale(row)) continue
-    const day = text(row.shift_date).slice(0, 10) || text(row.created_at).slice(0, 10)
-    if (day >= start && day <= end) counts.set(day, (counts.get(day) || 0) + 1)
+  const dailyKitchenMinutes = {}
+  const allSeconds = []
+  for (const { day, sales, histories } of loaded) {
+    const allowed = new Set()
+    let count = 0
+    for (const row of sales) {
+      if (!isCompetitionSale(row)) continue
+      count += 1
+      const key = saleKey(row.id_sale)
+      if (key) allowed.add(key)
+    }
+    counts.set(day, count)
+
+    const daySeconds = []
+    for (const row of histories) {
+      if (!allowed.has(saleKey(row.id_sale))) continue
+      const seconds = competitionKitchenSeconds(row)
+      if (seconds === null) continue
+      daySeconds.push(seconds)
+      allSeconds.push(seconds)
+    }
+    const average = durationStats(daySeconds).averageMinutes
+    if (typeof average === 'number') dailyKitchenMinutes[day] = average
   }
+
+  return {
+    counts,
+    averageMinutes: durationStats(allSeconds).averageMinutes,
+    dailyKitchenMinutes,
+  }
+}
+
+/**
+ * Conta entrega e salão de cada dia, sem canceladas, balcão ou ficha.
+ */
+export async function getSaiposDailySalesCounts({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+  const { counts } = await getSaiposCompetitionMetrics({ start, end, token, signal, fresh, cacheScope })
   return counts
 }

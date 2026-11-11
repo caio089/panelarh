@@ -23,6 +23,7 @@ type KdsOrder = {
   code: string
   channel: 'delivery' | 'mesa' | 'outros'
   label?: string
+  reference?: string
   status: string
   enteredAt: string | null
   waitingMinutes: number | null
@@ -46,6 +47,32 @@ type KdsPayload = {
 
 const ACCENTS: Record<string, string> = { Dirceu: '#F4B942', Promorar: '#E15B3F', Mocambinho: '#80C997' }
 const TV_UNITS: Record<string, string> = { dirceu: 'Dirceu', promorar: 'Promorar', mocambinho: 'Mocambinho' }
+
+function unitSlug(value: string | undefined) {
+  let raw = value || ''
+  try {
+    raw = decodeURIComponent(raw)
+  } catch {
+    raw = value || ''
+  }
+  const slug = raw.trim().toLowerCase()
+  return TV_UNITS[slug] ? slug : null
+}
+
+/** Endereço canônico da TV. /tv/Mocambinho e /Mocambinho passam a abrir a mesma operação. */
+export function canonicalTvPath(pathname: string) {
+  const parts = pathname.split('/').filter(Boolean).map((part) => {
+    try {
+      return decodeURIComponent(part).trim().toLowerCase()
+    } catch {
+      return part.trim().toLowerCase()
+    }
+  })
+  if (parts.length === 0) return null
+  const last = parts[parts.length - 1]
+  if (parts[0] === 'tv' || TV_UNITS[last]) return `/${parts.join('/')}`
+  return null
+}
 const REFRESH_MS = 60 * 1000
 const KDS_REFRESH_MS = 30 * 1000
 const KDS_RETRY_MS = 2 * 60 * 1000
@@ -79,8 +106,8 @@ function pointsForPosition(position: number) {
 export function TvCompetitionPage() {
   const { unit: requestedUnit } = useParams()
   const { pathname } = useLocation()
-  const routeUnit = requestedUnit || pathname.split('/').filter(Boolean)[0] || ''
-  const tvUnitId = TV_UNITS[routeUnit] ? routeUnit : null
+  const routeUnit = requestedUnit || pathname.split('/').filter(Boolean).at(-1) || ''
+  const tvUnitId = unitSlug(routeUnit)
 
   if (tvUnitId) return <TvUnitDashboard unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} />
   return <CompetitionDashboard />
@@ -370,7 +397,7 @@ function CompetitionDashboard() {
           <section className="grid min-h-0 flex-1 grid-cols-2 gap-5">
             <RankingCard
               title={period === 'mes' ? 'Vendas no mês' : 'Vendas em tempo real'}
-              subtitle={`Ranking de vendas do ${periodLabel}`}
+              subtitle={`Mesa e delivery no ${periodLabel}`}
               icon={<Trophy size={24} />}
               units={salesRanking}
               showPoints={false}
@@ -378,7 +405,7 @@ function CompetitionDashboard() {
             />
             <RankingCard
               title={period === 'mes' ? 'Tempo médio no mês' : 'Tempo médio em tempo real'}
-              subtitle={`Ranking de rapidez do ${periodLabel}`}
+              subtitle={`Cozinha de mesa e delivery no ${periodLabel}`}
               icon={<Clock3 size={24} />}
               units={kitchenRanking}
               type="kitchen"
@@ -520,11 +547,11 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
             <CompactOrderList orders={activeOrders} empty="Nenhum pedido na fila" />
           </TvPanel>
 
-          <TvPanel title="Tempo médio" subtitle={`${periodLabel} · troca automática`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+          <TvPanel title="Tempo médio" subtitle={`${periodLabel} · mesa e delivery`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
             <CompactRanking units={kitchenRanking} type="kitchen" highlight={unitName} />
           </TvPanel>
 
-          <TvPanel title="Vendas" subtitle={`${periodLabel} · troca automática`} icon={<Trophy size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+          <TvPanel title="Vendas" subtitle={`${periodLabel} · mesa e delivery`} icon={<Trophy size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
             <CompactRanking units={salesRanking} type="sales" highlight={unitName} />
           </TvPanel>
 
@@ -556,7 +583,7 @@ function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[
   if (orders.length === 0) return <div className="flex h-full min-h-16 items-center justify-center text-sm font-semibold text-white/35">{empty}</div>
   return <ol className="grid grid-cols-2 content-start gap-1">
     {orders.slice(0, 8).map((order, index) => <li key={`${order.code}-${index}`} className={`flex min-h-0 items-center justify-between gap-1.5 rounded-lg border px-2 py-1 ${urgent ? 'border-[#E15B3F]/35 bg-[#E15B3F]/10' : 'border-white/8 bg-[#090E20]/55'}`}>
-      <div className="min-w-0"><p className="truncate text-xs font-extrabold">{order.label || `#${order.code}`}</p><p className="truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{kdsChannelLabel(order.channel)} · {kdsStatusLabel(order.status)}</p></div>
+      <div className="min-w-0"><p className="truncate font-display text-lg leading-none">{order.label || (order.channel === 'delivery' ? '#' : 'Mesa')}</p><p className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">{[kdsChannelLabel(order.channel), order.reference, kdsStatusLabel(order.status)].filter(Boolean).join(' · ')}</p></div>
       <strong className={`shrink-0 font-display text-lg tabular-nums ${urgent ? 'text-[#FF8E78]' : 'text-[#F4B942]'}`}>{typeof order.waitingMinutes === 'number' ? `${order.waitingMinutes}m` : '—'}</strong>
     </li>)}
   </ol>
@@ -612,8 +639,8 @@ function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodL
       </article>
 
       <div className="mt-5 grid grid-cols-2 gap-5">
-        <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Quantidade por unidade" icon={<Trophy size={20} />} units={salesRanking} />
-        <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Tempo médio de preparo" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
+        <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Mesa e delivery" icon={<Trophy size={20} />} units={salesRanking} />
+        <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Cozinha de mesa e delivery" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" />
       </div>
     </section>
   )

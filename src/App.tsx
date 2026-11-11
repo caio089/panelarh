@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { DataProvider } from '@/contexts/DataContext'
 import { AdminShell } from '@/components/AdminShell'
@@ -20,9 +20,16 @@ import { UnitOverviewTab } from '@/pages/unit/UnitOverviewTab'
 import { UnitCollaboratorsTab } from '@/pages/unit/UnitCollaboratorsTab'
 import { UnitScheduleTab } from '@/pages/unit/UnitScheduleTab'
 import { GestaoStoreProvider } from '@/features/gestao/GestaoStoreProvider'
-import { TvCompetitionPage } from '@/pages/TvCompetitionPage'
+import { canonicalTvPath, TvCompetitionPage } from '@/pages/TvCompetitionPage'
 import { PeopleOpsPage } from '@/pages/PeopleOpsPage'
 import { CollaboratorsPage } from '@/pages/CollaboratorsPage'
+
+function UnknownRoute() {
+  const { pathname, search, hash } = useLocation()
+  const canonical = canonicalTvPath(pathname)
+  if (canonical && canonical !== pathname) return <Navigate to={`${canonical}${search}${hash}`} replace />
+  return <Navigate to="/" replace />
+}
 
 export default function App() {
   return (
@@ -70,7 +77,7 @@ export default function App() {
                 <Route path="mensagens" element={<Navigate to="/admin/selecao" replace />} />
               </Route>
 
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<UnknownRoute />} />
             </Routes>
           </BrowserRouter>
         </GestaoStoreProvider>

@@ -52,7 +52,7 @@ export function CompetitionAdminPanel() {
         <div>
           <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[1.6px] text-[#F4B942]"><Trophy size={13} /> Operação Saipos</p>
           <h2 className="mt-1 font-display text-3xl">Comparativo entre unidades</h2>
-          <p className="mt-1 text-sm text-white/65">Quantidade de vendas por unidade. Clique para abrir o detalhamento de cada casa.</p>
+          <p className="mt-1 text-sm text-white/65">Mesa e delivery por unidade, sem balcão, ficha ou cancelados. Clique para abrir o detalhamento de cada casa.</p>
         </div>
         <div className="flex items-center gap-3">
           {updatedAt ? <span className="text-xs text-white/50">Atualizado às {updatedAt}</span> : null}

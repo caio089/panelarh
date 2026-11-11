@@ -1,4 +1,4 @@
-import { getSaiposDailySalesCounts, getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
+import { competitionOrderCount, getSaiposCompetitionMetrics, getSaiposReport, todayInFortaleza } from '../server/saiposDirceu.js'
 import { SAIPOS_UNITS } from '../server/saiposUnits.js'
 import { waitUntil } from '@vercel/functions'
 import { readCompetitionCache, saveCompetitionCache } from '../server/competitionCache.js'
@@ -19,12 +19,6 @@ function monthDays(start, end) {
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
   return days
-}
-
-function kitchenMinutes(report) {
-  const stages = Array.isArray(report?.stages) ? report.stages : []
-  const cooking = stages.find((stage) => String(stage.label).trim().toLowerCase() === 'cozinha')
-  return typeof cooking?.averageMinutes === 'number' ? cooking.averageMinutes : null
 }
 
 function pointsForPosition(position) {
@@ -56,7 +50,7 @@ export default async function handler(req, res) {
   const dailyRanking = req.query?.modo === 'diario'
   const kitchenOnly = req.query?.dados === 'cozinha'
   const forceRefresh = req.query?.atualiza === '1'
-  const metric = dailyRanking ? 'ranking-pontos-diarios-v2' : kitchenOnly ? 'cozinha' : 'vendas'
+  const metric = dailyRanking ? 'ranking-pontos-diarios-v3' : kitchenOnly ? 'cozinha-mesa-delivery' : 'vendas-mesa-delivery'
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
@@ -71,15 +65,16 @@ export default async function handler(req, res) {
   const loadScoreboard = async (signal, fresh = false) => {
     const units = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
+        const start = period === 'mes' ? `${date.slice(0, 7)}-01` : date
         if (kitchenOnly) {
           try {
-            const kitchen = await getSaiposReport({ date, category: 'cozinha', period, token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id })
+            const kitchen = await getSaiposCompetitionMetrics({ start, end: date, token: unit.token(), signal, fresh, cacheScope: unit.id })
             return {
               id: unit.id,
               name: unit.name,
               orders: 0,
-              kitchenMinutes: kitchenMinutes(kitchen.report),
-              dailyKitchenMinutes: kitchen.report.dailyKitchenMinutes || {},
+              kitchenMinutes: kitchen.averageMinutes,
+              dailyKitchenMinutes: kitchen.dailyKitchenMinutes,
             }
           } catch {
             return { id: unit.id, name: unit.name, orders: 0, kitchenMinutes: null }
@@ -89,7 +84,7 @@ export default async function handler(req, res) {
         return {
           id: unit.id,
           name: unit.name,
-          orders: sales.report.count,
+          orders: competitionOrderCount(sales.report),
         }
       }),
     )
@@ -100,23 +95,20 @@ export default async function handler(req, res) {
     const start = `${today.slice(0, 7)}-01`
     const dailyData = await Promise.all(
       Object.values(SAIPOS_UNITS).map(async (unit) => {
-        const [counts, kitchen] = await Promise.all([
-          getSaiposDailySalesCounts({ start, end: today, token: unit.token(), signal, fresh, cacheScope: unit.id }),
-          getSaiposReport({ date: today, category: 'cozinha', period: 'mes', token: unit.token(), signal, fresh, unit: unit.name, cacheScope: unit.id }),
-        ])
-        return { unit, counts, kitchen }
+        const metrics = await getSaiposCompetitionMetrics({ start, end: today, token: unit.token(), signal, fresh, cacheScope: unit.id })
+        return { unit, metrics }
       }),
     )
     const standings = new Map(Object.values(SAIPOS_UNITS).map((unit) => [unit.id, {
       id: unit.id, name: unit.name, salesPoints: 0, kitchenPoints: 0, total: 0,
     }]))
     const days = monthDays(start, today).map((day) => {
-      const units = dailyData.map(({ unit, counts, kitchen }) => ({
+      const units = dailyData.map(({ unit, metrics }) => ({
         id: unit.id,
         name: unit.name,
-        orders: counts.get(day) || 0,
-        kitchenMinutes: typeof kitchen.report.dailyKitchenMinutes?.[day] === 'number'
-          ? kitchen.report.dailyKitchenMinutes[day]
+        orders: metrics.counts.get(day) || 0,
+        kitchenMinutes: typeof metrics.dailyKitchenMinutes[day] === 'number'
+          ? metrics.dailyKitchenMinutes[day]
           : null,
       }))
       for (const unit of units) {
@@ -141,10 +133,10 @@ export default async function handler(req, res) {
       fetchedAt: new Date().toISOString(),
       days,
       standings: [...standings.values()].sort((a, b) => b.total - a.total || b.salesPoints - a.salesPoints || a.name.localeCompare(b.name)),
-      kitchenUnits: dailyData.map(({ unit, kitchen }) => ({
+      kitchenUnits: dailyData.map(({ unit, metrics }) => ({
         id: unit.id,
         name: unit.name,
-        kitchenMinutes: kitchenMinutes(kitchen.report),
+        kitchenMinutes: metrics.averageMinutes,
       })),
     }
   }
