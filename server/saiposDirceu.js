@@ -889,18 +889,20 @@ export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = fa
     const saleNumber = label(row.sale_number)
     const partner = row.partner_sale && typeof row.partner_sale === 'object' ? row.partner_sale : null
     const partnerNumber = label(partner?.cod_sale2)
+    const tableStatus = num(row.table_order?.id_table_order_status)
+    const include = !isCanceledSale(row) && (saleType !== 3 || tableStatus !== 1)
     const ticket = row.ticket && typeof row.ticket === 'object'
       ? label(row.ticket.number) || label(row.ticket.service_ticket_number)
       : label(row.ticket)
 
     if (saleType === 1) {
       const number = saleNumber || partnerNumber || code
-      return [code, { channel: 'delivery', label: `#${number}` }]
+      return [code, { channel: 'delivery', label: `#${number}`, include }]
     }
-    if (saleType === 3) return [code, { channel: 'mesa', label: 'Mesa' }]
-    if (saleType === 2) return [code, { channel: 'outros', label: saleNumber ? `Balcão #${saleNumber}` : 'Balcão' }]
-    if (saleType === 4) return [code, { channel: 'outros', label: ticket ? `Ficha #${ticket}` : 'Ficha' }]
-    return [code, { channel: 'outros', label: `#${code}` }]
+    if (saleType === 3) return [code, { channel: 'mesa', label: 'Mesa', include }]
+    if (saleType === 2) return [code, { channel: 'outros', label: saleNumber ? `Balcão #${saleNumber}` : 'Balcão', include }]
+    if (saleType === 4) return [code, { channel: 'outros', label: ticket ? `Ficha #${ticket}` : 'Ficha', include }]
+    return [code, { channel: 'outros', label: `#${code}`, include }]
   }))
 }
 

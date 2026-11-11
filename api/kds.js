@@ -40,19 +40,27 @@ export default async function handler(req, res) {
       getSaiposKdsOrderDetails({ date, token: unit.token(), signal, fresh: true, cacheScope: unit.id }),
     ])
     const report = payload.report || {}
+    const queue = Array.isArray(report.queue)
+      ? report.queue
+        .slice(0, 30)
+        .map((order) => ({ ...order, ...orderDetails.get(order.code) }))
+        .filter((order) => order.include !== false)
+        .map(({ include: _include, ...order }) => order)
+      : []
+    const preparing = queue.filter((order) => order.status === 'Cozinha').length
+    const waiting = queue.filter((order) => order.status === 'Aguardando Entrega').length
+    const onTheWay = queue.filter((order) => order.status === 'Saiu para entrega').length
     const response = {
       unit: unit.name,
       date,
       fetchedAt: payload.fetchedAt,
-      active: report.active || 0,
-      preparing: report.preparing || 0,
-      waiting: report.waiting || 0,
-      onTheWay: report.onTheWay || 0,
-      urgent: report.urgent || 0,
+      active: queue.length,
+      preparing,
+      waiting,
+      onTheWay,
+      urgent: queue.filter((order) => order.urgent).length,
       urgentAfterMinutes: report.urgentAfterMinutes || 15,
-      queue: Array.isArray(report.queue)
-        ? report.queue.slice(0, 30).map((order) => ({ ...order, ...orderDetails.get(order.code) }))
-        : [],
+      queue,
     }
     await saveKdsCache(unit.id, date, response)
     return response
