@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type HTMLAttributes } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
   DndContext,
@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { ArrowLeft, MessageCircle, Trash2, X, UserRound } from 'lucide-react'
+import { ArrowLeft, GripVertical, MessageCircle, Trash2, UserRound, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import { formatDateBR } from '@/lib/utils'
@@ -51,7 +51,7 @@ export function AdminVagaPage() {
   const [pendingStatus, setPendingStatus] = useState<{ id: string; status: CandidateStatus } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const columns = useMemo(() => {
     const map: Record<CandidateStatus, CandFull[]> = {
@@ -173,10 +173,14 @@ export function AdminVagaPage() {
               items={columns[status]}
               onOpen={setSelected}
               onDelete={(c) => {
-                if (confirm(`Excluir ${c.nome}?`)) {
-                  deleteCandidato(c.id)
-                  if (selected?.id === c.id) setSelected(null)
-                }
+                if (!confirm(`Excluir ${c.nome}? A candidatura sai do painel.`)) return
+                void deleteCandidato(c.id)
+                  .then(() => {
+                    if (selected?.id === c.id) setSelected(null)
+                  })
+                  .catch((err: unknown) => {
+                    setNotice(err instanceof Error ? err.message : 'Não foi possível excluir o candidato.')
+                  })
               }}
             />
           ))}
@@ -221,6 +225,21 @@ export function AdminVagaPage() {
                 <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
               </section>
             ) : null}
+
+            <Button
+              variant="danger"
+              className="w-full"
+              onClick={() => {
+                if (!confirm(`Excluir ${selected.nome}? A candidatura sai do painel.`)) return
+                void deleteCandidato(selected.id)
+                  .then(() => setSelected(null))
+                  .catch((err: unknown) => {
+                    setNotice(err instanceof Error ? err.message : 'Não foi possível excluir o candidato.')
+                  })
+              }}
+            >
+              <Trash2 size={15} /> Excluir candidatura
+            </Button>
 
             <Button
               className="w-full"
@@ -384,10 +403,8 @@ function SortableCand({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
-      {...attributes}
-      {...listeners}
     >
-      <CandCard cand={cand} onOpen={onOpen} onDelete={onDelete} />
+      <CandCard cand={cand} onOpen={onOpen} onDelete={onDelete} dragHandle={{ ...attributes, ...listeners }} />
     </div>
   )
 }
@@ -397,20 +414,40 @@ function CandCard({
   onOpen,
   onDelete,
   dragging,
+  dragHandle,
 }: {
   cand: CandFull
   onOpen?: () => void
   onDelete?: () => void
   dragging?: boolean
+  dragHandle?: HTMLAttributes<HTMLButtonElement>
 }) {
   return (
     <div className={`rounded-[10px] border border-[#E7E2D3] bg-white p-3 shadow-sm ${dragging ? 'ring-2 ring-[var(--pv-terracotta)]' : ''}`}>
-      <button type="button" className="w-full text-left" onClick={onOpen}>
-        <div className="text-sm font-bold text-[var(--pv-navy)]">{cand.nome}</div>
-        <div className="mt-1 text-[11.5px] text-[#6B664F]">{cand.profile?.city || cand.profile?.desired_role || 'Candidato'}</div>
-      </button>
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          className="mt-0.5 cursor-grab touch-none rounded-md p-1 text-[#A9A493] hover:bg-[#F1EDE0] hover:text-[var(--pv-navy)]"
+          aria-label={`Mover ${cand.nome}`}
+          {...dragHandle}
+        >
+          <GripVertical size={14} />
+        </button>
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen}>
+          <div className="text-sm font-bold text-[var(--pv-navy)]">{cand.nome}</div>
+          <div className="mt-1 text-[11.5px] text-[#6B664F]">{cand.profile?.city || cand.profile?.desired_role || 'Candidato'}</div>
+        </button>
+      </div>
       {onDelete ? (
-        <button type="button" className="mt-2 text-[11px] font-semibold text-[#B23B3B]" onClick={onDelete}>
+        <button
+          type="button"
+          className="mt-2 text-[11px] font-semibold text-[#B23B3B]"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDelete()
+          }}
+        >
           Excluir
         </button>
       ) : null}

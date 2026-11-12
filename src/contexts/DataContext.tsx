@@ -12,7 +12,6 @@ import type { CandidateStatus, Candidato, Unit, Vaga } from '@/types'
 import type { AppStore } from '@/lib/data'
 import {
   candidatoIdentity,
-  candidatoKey,
   deleteRemoteCandidato,
   insertCandidato,
   listCandidatos,
@@ -94,7 +93,7 @@ interface DataContextValue {
     vagaId: string,
     candidatoId: string,
   ) => { chosenName: string; parked: number } | { error: string }
-  deleteCandidato: (candidatoId: string) => void
+  deleteCandidato: (candidatoId: string) => Promise<void>
   submitPublicApplication: (input: PublicApplicationInput) => Promise<{ error?: string; candidatoId?: string }>
   sendMessage: (candidatoId: string, senderId: string, body: string) => void
   addUnit: (name: string) => Promise<string>
@@ -173,51 +172,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const [vagas, listed] = await Promise.all([listVagas(), listCandidatos()])
       if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
 
-      const vagaIds = new Set(vagas.map((vaga) => vaga.id))
-      const known = new Set(listed.map((candidato) => candidato.id))
-      const knownKeys = new Set(listed.map((candidato) => candidatoKey(candidato)))
-      const knownPeople = new Set(listed.map((candidato) => candidatoIdentity(candidato)))
-      const pending = loadDemoStore().candidatos.filter(
-        (candidato) =>
-          vagaIds.has(candidato.vaga_id) &&
-          !known.has(candidato.id) &&
-          !knownKeys.has(candidatoKey(candidato)) &&
-          !knownPeople.has(candidatoIdentity(candidato)),
-      )
-
-      const keptLocal = []
-      if (pending.length > 0) {
-        for (const candidato of pending) {
-          try {
-            const saved = await insertCandidato({
-              vagaId: candidato.vaga_id,
-              nome: candidato.nome,
-              cpf: candidato.cpf,
-              experiencia: candidato.experiencia,
-              info: candidato.info_complementar,
-              referencia: candidato.referencia,
-              curriculoUrl: candidato.curriculo_url,
-              curriculoNome: candidato.curriculo_nome,
-              criadoEm: candidato.criado_em,
-            })
-            const status: CandidateStatus = candidato.status === 'reprovada' ? 'banco' : candidato.status
-            if (status !== 'pendente') {
-              await updateRemoteCandidato(saved.id, {
-                status,
-                data_inicio_treinamento: candidato.data_inicio_treinamento,
-              })
-              saved.status = status
-              saved.data_inicio_treinamento = status === 'aprovada' ? candidato.data_inicio_treinamento : null
-            }
-            listed.push(saved)
-            knownPeople.add(candidatoIdentity(saved))
-          } catch {
-            if (!knownPeople.has(candidatoIdentity(candidato))) keptLocal.push(candidato)
-          }
-        }
-        if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
-      }
-      const candidatos = [...listed, ...keptLocal]
+      const candidatos = listed
         .filter((candidato, index, all) => all.findIndex((item) => candidatoIdentity(item) === candidatoIdentity(candidato)) === index)
         .sort((a, b) => +new Date(b.criado_em) - +new Date(a.criado_em))
 
@@ -394,17 +349,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return result
   }, [store.candidatos])
 
-  const deleteCandidato = useCallback((candidatoId: string) => {
+  const deleteCandidato = useCallback(async (candidatoId: string) => {
+    const target = store.candidatos.find((candidato) => candidato.id === candidatoId)
+    const identity = target ? candidatoIdentity(target) : ''
     candidatoWrite.current += 1
-    setStore((prev) => ({
-      ...prev,
-      candidatos: prev.candidatos.filter((c) => c.id !== candidatoId),
-      messages: prev.messages.filter((m) => m.candidato_id !== candidatoId),
-    }))
-    void deleteRemoteCandidato(candidatoId).catch((err: unknown) => {
-      setCandidatosError(err instanceof Error ? err.message : 'Não foi possível excluir o candidato.')
-    })
-  }, [])
+    try {
+      await deleteRemoteCandidato(candidatoId)
+      setCandidatosError('')
+      setStore((prev) => {
+        const next = {
+          ...prev,
+          candidatos: prev.candidatos.filter((candidato) => {
+            if (candidato.id === candidatoId) return false
+            return !(identity && candidatoIdentity(candidato) === identity)
+          }),
+          messages: prev.messages.filter((message) => message.candidato_id !== candidatoId),
+        }
+        saveDemoStore(next)
+        return next
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Não foi possível excluir o candidato.'
+      setCandidatosError(message)
+      throw err instanceof Error ? err : new Error(message)
+    }
+  }, [store.candidatos])
 
   const submitPublicApplication = useCallback(
     async (input: PublicApplicationInput) => {

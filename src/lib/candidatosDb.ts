@@ -124,6 +124,6 @@ export async function updateRemoteCandidato(
 
 export async function deleteRemoteCandidato(candidatoId: string) {
   const supabase = requireDatabase()
-  const { error } = await supabase.from('candidatos').delete().eq('id', candidatoId)
-  if (error) throw new Error('Não foi possível excluir o candidato.')
+  const { data, error } = await supabase.from('candidatos').delete().eq('id', candidatoId).select('id')
+  if (error || !data?.length) throw new Error('Não foi possível excluir o candidato.')
 }

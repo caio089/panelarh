@@ -522,7 +522,8 @@ function statusFromQuery(value: string | null): 'all' | CandidateStatus {
 
 export function AdminCandidatesPage() {
   const { isAdmin, isRh, profile } = useAuth()
-  const { store } = useData()
+  const { store, deleteCandidato } = useData()
+  const [listError, setListError] = useState('')
 
   const unitIds = useMemo(
     () => (isAdmin || isRh ? store.units.map((u) => u.id) : [profile?.unit_id || store.units[0]?.id]),
@@ -595,6 +596,12 @@ export function AdminCandidatesPage() {
             : `${candidatos.length} resultado${candidatos.length === 1 ? '' : 's'} com os filtros atuais`
         }
       />
+
+      {listError ? (
+        <div className="mt-4">
+          <Alert tone="error">{listError}</Alert>
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Nome" labelClassName="text-[var(--pv-cream)]/75">
@@ -680,13 +687,33 @@ export function AdminCandidatesPage() {
                       />
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <Link
-                        to={`/admin/vagas/${c.vaga_id}`}
-                        className="font-semibold text-[var(--pv-terracotta)] hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Pipeline →
-                      </Link>
+                      <div className="flex justify-end gap-3">
+                        <button
+                          type="button"
+                          className="font-semibold text-[#B23B3B] hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!confirm(`Excluir ${c.nome}? A candidatura sai do painel.`)) return
+                            void deleteCandidato(c.id)
+                              .then(() => {
+                                setListError('')
+                                if (detail?.candidato.id === c.id) setDetail(null)
+                              })
+                              .catch((err: unknown) => {
+                                setListError(err instanceof Error ? err.message : 'Não foi possível excluir o candidato.')
+                              })
+                          }}
+                        >
+                          Excluir
+                        </button>
+                        <Link
+                          to={`/admin/vagas/${c.vaga_id}`}
+                          className="font-semibold text-[var(--pv-terracotta)] hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Pipeline →
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 )
