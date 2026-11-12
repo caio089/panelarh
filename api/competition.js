@@ -2,23 +2,13 @@ import { competitionOrderCount, getSaiposCompetitionMetrics, getSaiposReport, to
 import { saiposUnit } from '../server/saiposUnits.js'
 import { waitUntil } from '@vercel/functions'
 import { readCompetitionCache, saveCompetitionCache } from '../server/competitionCache.js'
+import { loadCompetitionSpan } from '../server/competitionDays.js'
 
 function isIsoDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [year, month, day] = value.split('-').map(Number)
   const date = new Date(Date.UTC(year, month - 1, day))
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-}
-
-function monthDays(start, end) {
-  const days = []
-  const cursor = new Date(`${start}T12:00:00Z`)
-  const final = new Date(`${end}T12:00:00Z`)
-  while (cursor <= final) {
-    days.push(cursor.toISOString().slice(0, 10))
-    cursor.setUTCDate(cursor.getUTCDate() + 1)
-  }
-  return days
 }
 
 function dailyResultClosed(date, today, now = new Date()) {
@@ -40,34 +30,40 @@ function cacheAge(payload) {
  * Uma unidade por chamada. A TV pede a casa que está na tela primeiro e só
  * depois as outras, para a Saipos não receber as três lojas ao mesmo tempo.
  */
-async function loadUnit({ unit, date, period, kitchenOnly, dailyRanking, signal, fresh }) {
-  const start = period === 'mes' ? `${date.slice(0, 7)}-01` : date
-  if (dailyRanking) {
-    const metrics = await getSaiposCompetitionMetrics({
-      start, end: date, token: unit.token(), signal, fresh, cacheScope: unit.id,
-    })
-    const days = monthDays(start, date).map((day) => ({
-      date: day,
-      orders: metrics.counts.get(day) || 0,
-      kitchenMinutes: typeof metrics.dailyKitchenMinutes[day] === 'number' ? metrics.dailyKitchenMinutes[day] : null,
-    }))
-    return {
+async function loadMonth({ unit, date, kitchenOnly, dailyRanking, signal, fresh }) {
+  const start = `${date.slice(0, 7)}-01`
+  const span = await loadCompetitionSpan({
+    unitId: unit.id,
+    token: unit.token(),
+    start,
+    end: date,
+    today: date,
+    signal,
+    fresh,
+  })
+  const ready = !span.partial
+  return {
+    payload: {
       date,
       period: 'mes',
       fetchedAt: new Date().toISOString(),
+      partial: span.partial,
       unit: {
         id: unit.id,
         name: unit.name,
-        orders: days.reduce((total, day) => total + day.orders, 0),
-        kitchenMinutes: metrics.averageMinutes ?? null,
+        orders: ready && !kitchenOnly ? span.orders : null,
+        kitchenMinutes: ready ? span.kitchenMinutes : null,
       },
-      days,
-    }
+      ...(dailyRanking && ready ? { days: span.days } : {}),
+    },
+    fill: span.fill,
   }
+}
 
+async function loadUnit({ unit, date, period, kitchenOnly, signal, fresh }) {
   if (kitchenOnly) {
     const kitchen = await getSaiposCompetitionMetrics({
-      start, end: date, token: unit.token(), signal, fresh, cacheScope: unit.id,
+      start: date, end: date, token: unit.token(), signal, fresh, cacheScope: unit.id,
     })
     return {
       date,
@@ -130,12 +126,24 @@ export default async function handler(req, res) {
   const scoreboardClosed = period === 'dia' && !dailyRanking && !kitchenOnly && dailyResultClosed(date, today)
   const refreshAfter = period === 'dia' && !dailyRanking ? 60 * 1000 : 10 * 60 * 1000
 
-  const refresh = () => loadUnit({
-    unit, date, period, kitchenOnly, dailyRanking, signal: new AbortController().signal, fresh: true,
-  }).then((payload) => saveCompetitionCache(period, date, metric, unit.id, payload))
+  const monthRequest = period === 'mes' || dailyRanking
+  const refresh = () => {
+    const signal = new AbortController().signal
+    if (!monthRequest) {
+      return loadUnit({
+        unit, date, period, kitchenOnly, signal, fresh: true,
+      }).then((payload) => saveCompetitionCache(period, date, metric, unit.id, payload))
+    }
+    return loadMonth({
+      unit, date, kitchenOnly, dailyRanking, signal, fresh: true,
+    }).then(({ payload, fill }) => {
+      if (payload.partial) return fill?.()
+      return saveCompetitionCache(period, date, metric, unit.id, payload)
+    })
+  }
 
   const cached = await readCompetitionCache(period, date, metric, unit.id)
-  if (cached?.unit && !forceRefresh) {
+  if (cached?.unit && !cached.partial && !forceRefresh) {
     if (!scoreboardClosed && cacheAge(cached) >= refreshAfter) waitUntil(refresh().catch(() => undefined))
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=90')
     return res.status(200).json({ ...cached, cached: true, closed: scoreboardClosed })
@@ -149,8 +157,18 @@ export default async function handler(req, res) {
   const controller = new AbortController()
   req.on?.('close', () => controller.abort())
   try {
+    if (monthRequest) {
+      const { payload, fill } = await loadMonth({
+        unit, date, kitchenOnly, dailyRanking, signal: controller.signal, fresh: forceRefresh,
+      })
+      if (!payload.partial) await saveCompetitionCache(period, date, metric, unit.id, payload)
+      else if (fill) waitUntil(fill().catch(() => undefined))
+      res.setHeader('Cache-Control', 'no-store')
+      return res.status(200).json(payload)
+    }
+
     const payload = await loadUnit({
-      unit, date, period, kitchenOnly, dailyRanking, signal: controller.signal, fresh: forceRefresh,
+      unit, date, period, kitchenOnly, signal: controller.signal, fresh: forceRefresh,
     })
     await saveCompetitionCache(period, date, metric, unit.id, payload)
     res.setHeader('Cache-Control', forceRefresh ? 'no-store' : 's-maxage=30, stale-while-revalidate=90')

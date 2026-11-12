@@ -220,11 +220,11 @@ function CompetitionDashboard() {
         date,
         period: selected,
         signal: controller.signal,
-        onUnit: (unit, fetchedAt) => publish(selected, unit, { orders: true, kitchen: false }, fetchedAt),
+        onUnit: (unit, fetchedAt) => publish(selected, unit, { orders: true, kitchen: selected === 'mes' }, fetchedAt),
       })
       if (!alive || controller.signal.aborted) return sales
-      if (sales.loaded.length > 0) filled.add(selected)
-      if (withKitchen) {
+      if (sales.loaded.length > 0 && !sales.pending) filled.add(selected)
+      if (selected === 'dia' && withKitchen) {
         await loadCompetitionUnits({
           unitIds: unitOrder,
           date,
@@ -239,32 +239,51 @@ function CompetitionDashboard() {
     }
 
     const loadRanking = async () => {
+      let pending = false
       const series: Array<{ name: string; days: Array<{ orders: number; kitchenMinutes: number | null }> }> = []
       for (const unitId of unitOrder) {
-        if (!alive || controller.signal.aborted) return
+        if (!alive || controller.signal.aborted) return false
         try {
           const payload = await fetchCompetitionUnit({ unitId, date, period: 'mes', daily: true, signal: controller.signal })
-          if (!payload.unit || !payload.days) continue
+          if (payload.partial || !payload.unit || !payload.days) {
+            pending = true
+            continue
+          }
           series.push({ name: payload.unit.name, days: payload.days })
           publish('mes', payload.unit, { orders: true, kitchen: true }, payload.fetchedAt)
         } catch {
           // Uma unidade sem série não impede o ranking das outras.
         }
       }
-      if (alive && series.length > 0) setMonthlyScores(standingsFromDays(series))
+      if (alive && !pending && series.length > 0) setMonthlyScores(standingsFromDays(series))
+      return pending
     }
 
+    let running = false
+    let retryTimer: number | undefined
     const run = async () => {
-      if (view === 'ranking' && period === 'mes') {
-        await loadRanking()
-        filled.add('mes')
-      } else {
-        const sales = await loadPeriod(period, Date.now() - lastKitchen > 3 * 60 * 1000)
-        if (!alive) return
-        setError(sales.error || '')
+      if (!alive || running) return
+      running = true
+      let pending = false
+      try {
+        if (view === 'ranking' && period === 'mes') {
+          pending = Boolean(await loadRanking())
+          if (!pending) filled.add('mes')
+        } else {
+          const sales = await loadPeriod(period, Date.now() - lastKitchen > 3 * 60 * 1000)
+          if (!alive) return
+          setError(sales.error || '')
+          pending = sales.pending
+        }
+        const other: CompetitionPeriod = period === 'dia' ? 'mes' : 'dia'
+        if (!filled.has(other)) {
+          const extra = await loadPeriod(other, true)
+          pending = pending || extra.pending
+        }
+      } finally {
+        running = false
       }
-      const other: CompetitionPeriod = period === 'dia' ? 'mes' : 'dia'
-      if (!filled.has(other)) await loadPeriod(other, true)
+      if (pending && alive) retryTimer = window.setTimeout(() => { void run() }, 20 * 1000)
     }
 
     void run()
@@ -275,6 +294,7 @@ function CompetitionDashboard() {
       alive = false
       controller.abort()
       window.clearInterval(timer)
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
     }
   }, [automaticRefresh, currentCompetitionDay, date, period, refreshKey, unitOrder, view])
 
@@ -506,10 +526,15 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
       }
       if (!alive || controller.signal.aborted) return
       if (Date.now() - lastMonth > 10 * 60 * 1000) {
-        await loadEach('mes', loadSales)
+        const month = await loadCompetitionUnits({
+          unitIds: unitOrder,
+          date: today,
+          period: 'mes',
+          signal: controller.signal,
+          onUnit: (unit, fetchedAt) => publish('mes', unit, { orders: true, kitchen: true }, fetchedAt),
+        })
         if (!alive || controller.signal.aborted) return
-        await loadEach('mes', loadKitchen)
-        if (alive) lastMonth = Date.now()
+        if (!month.pending && month.loaded.length === unitOrder.length) lastMonth = Date.now()
       }
       if (alive) timer = window.setTimeout(() => { void run() }, REFRESH_MS)
     }

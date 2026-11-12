@@ -965,6 +965,7 @@ export async function getSaiposCompetitionMetrics({ start, end, token, signal, f
 
   const counts = new Map()
   const dailyKitchenMinutes = {}
+  const dailyKitchenTotals = {}
   const allSeconds = []
   for (const { day, sales, histories } of loaded) {
     const allowed = new Set()
@@ -987,12 +988,17 @@ export async function getSaiposCompetitionMetrics({ start, end, token, signal, f
     }
     const average = durationStats(daySeconds).averageMinutes
     if (typeof average === 'number') dailyKitchenMinutes[day] = average
+    dailyKitchenTotals[day] = {
+      seconds: daySeconds.reduce((sum, value) => sum + value, 0),
+      samples: daySeconds.length,
+    }
   }
 
   return {
     counts,
     averageMinutes: durationStats(allSeconds).averageMinutes,
     dailyKitchenMinutes,
+    dailyKitchenTotals,
   }
 }
 

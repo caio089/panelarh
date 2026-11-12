@@ -18,6 +18,7 @@ export type CompetitionDayPoint = {
 type CompetitionResponse = {
   error?: string
   fetchedAt?: string
+  partial?: boolean
   unit?: CompetitionUnitMetric
   days?: CompetitionDayPoint[]
 }
@@ -77,20 +78,25 @@ export async function loadCompetitionUnits({
 }) {
   const loaded: string[] = []
   let primaryError = ''
+  let pending = false
   for (const unitId of unitIds) {
-    if (signal?.aborted) return { loaded, error: primaryError }
+    if (signal?.aborted) return { loaded, error: primaryError, pending }
     try {
       const payload = await fetchCompetitionUnit({ unitId, date, period, kitchen, signal })
-      if (!payload.unit) continue
+      if (payload.partial || !payload.unit) {
+        pending = true
+        continue
+      }
       onUnit(payload.unit, payload.fetchedAt)
       loaded.push(unitId)
     } catch (error) {
-      if (signal?.aborted) return { loaded, error: primaryError }
+      if (signal?.aborted) return { loaded, error: primaryError, pending }
       if (!primaryError) primaryError = error instanceof Error ? error.message : 'Não foi possível atualizar a unidade.'
     }
   }
   return {
     loaded,
-    error: loaded.includes(unitIds[0]) ? '' : primaryError || 'Não foi possível atualizar vendas e tempos.',
+    pending,
+    error: pending || loaded.includes(unitIds[0]) ? '' : primaryError || 'Não foi possível atualizar vendas e tempos.',
   }
 }
