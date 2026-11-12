@@ -434,7 +434,9 @@ export function PublicApplyPage() {
                   <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
                     Currículo, se quiser
                   </p>
-                  <p className="mb-2 text-xs text-[var(--pv-muted)]">PDF, Word ou foto. Até 5 MB. Não é obrigatório.</p>
+                  <p className="mb-2 text-xs text-[var(--pv-muted)]">
+                    Manda uma foto nítida do papel. Compactamos no envio. PDF e Word não entram porque pesam demais. Não é obrigatório.
+                  </p>
                   <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--pv-line-strong)] bg-[#FBF9F3] px-3.5 py-3 text-sm text-[var(--pv-navy)] hover:bg-[#F1EDE0]">
                     <span className="inline-flex min-w-0 items-center gap-2">
                       <Paperclip size={16} />
@@ -443,7 +445,7 @@ export function PublicApplyPage() {
                     <span className="shrink-0 font-bold text-[var(--pv-terracotta)]">{resume ? 'Trocar' : 'Anexar'}</span>
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                      accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp"
                       className="sr-only"
                       onChange={(event) => pickResume(event.target.files?.[0] ?? null)}
                     />

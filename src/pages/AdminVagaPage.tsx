@@ -1,12 +1,12 @@
-import { useMemo, useState, type HTMLAttributes } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
-  closestCorners,
   useDroppable,
   type DragEndEvent,
   type DragStartEvent,
@@ -16,6 +16,7 @@ import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-
 import { ArrowLeft, GripVertical, MessageCircle, Trash2, UserRound, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
+import { detectPipelineDrop, statusFromDrop } from '@/lib/pipelineDnd'
 import { formatDateBR } from '@/lib/utils'
 import { openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
@@ -51,7 +52,10 @@ export function AdminVagaPage() {
   const [pendingStatus, setPendingStatus] = useState<{ id: string; status: CandidateStatus } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 160, tolerance: 8 } }),
+  )
 
   const columns = useMemo(() => {
     const map: Record<CandidateStatus, CandFull[]> = {
@@ -88,37 +92,35 @@ export function AdminVagaPage() {
   const vagaUnitName = vaga.unitName
   const vagaId = vaga.id
 
-  function onDragEnd(event: DragEndEvent) {
-    setActiveId(null)
-    const { active, over } = event
-    if (!over) return
-    const candId = String(active.id)
-    const overId = String(over.id)
-    let nextStatus: CandidateStatus | null = null
-    if (PIPELINE_ORDER.includes(overId as CandidateStatus)) nextStatus = overId as CandidateStatus
-    else {
-      const overCand = cands.find((c) => c.id === overId)
-      if (overCand) nextStatus = overCand.status
-    }
-    const cand = cands.find((c) => c.id === candId)
-    if (!cand || !nextStatus || cand.status === nextStatus) return
-    if (nextStatus === 'reprovada') nextStatus = 'banco'
-    if (nextStatus === 'aprovada') {
-      setPendingStatus({ id: candId, status: nextStatus })
+  function moveCandidate(candId: string, nextStatus: CandidateStatus) {
+    const cand = cands.find((item) => item.id === candId)
+    let status = nextStatus === 'reprovada' ? 'banco' : nextStatus
+    if (!cand || cand.status === status) return
+    if (status === 'aprovada') {
+      setPendingStatus({ id: candId, status })
       setTrainingDate('')
       return
     }
-    updateCandidatoStatus(candId, nextStatus)
-    setSelected({ ...cand, status: nextStatus })
+    updateCandidatoStatus(candId, status)
+    setSelected({ ...cand, status })
     setNotifyError('')
     setNotifyBody(
       whatsAppMessageForStatus({
         nome: cand.nome,
         vaga: vagaTitle,
-        status: nextStatus,
+        status,
       }),
     )
     setNotifyOpen(true)
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    setActiveId(null)
+    const { active, over } = event
+    if (!over) return
+    const nextStatus = statusFromDrop(String(over.id), (id) => cands.find((item) => item.id === id)?.status)
+    if (!nextStatus) return
+    moveCandidate(String(active.id), nextStatus)
   }
 
   const activeCand = cands.find((c) => c.id === activeId)
@@ -137,7 +139,7 @@ export function AdminVagaPage() {
           <div>
             <h1 className="font-display text-2xl text-[#F7F4EC] sm:text-3xl">{vagaTitle}</h1>
             <p className="mt-1 text-sm pv-cream-text">
-              {cands.length} candidato{cands.length === 1 ? '' : 's'} no pipeline · arraste entre colunas
+              {cands.length} candidato{cands.length === 1 ? '' : 's'} no pipeline · arraste o cartão ou use Passar para
             </p>
           </div>
           <Button
@@ -161,8 +163,9 @@ export function AdminVagaPage() {
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={detectPipelineDrop}
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
+        onDragCancel={() => setActiveId(null)}
         onDragEnd={onDragEnd}
       >
         <div className="pv-scroll flex gap-4 overflow-x-auto px-5 py-6 sm:px-8">
@@ -172,8 +175,9 @@ export function AdminVagaPage() {
               status={status}
               items={columns[status]}
               onOpen={setSelected}
+              onMove={moveCandidate}
               onDelete={(c) => {
-                if (!confirm(`Excluir ${c.nome}? A candidatura sai do painel.`)) return
+                if (!confirm(`Excluir ${c.nome}? A candidatura e o currículo saem do painel.`)) return
                 void deleteCandidato(c.id)
                   .then(() => {
                     if (selected?.id === c.id) setSelected(null)
@@ -223,7 +227,7 @@ export function AdminVagaPage() {
               variant="danger"
               className="w-full"
               onClick={() => {
-                if (!confirm(`Excluir ${selected.nome}? A candidatura sai do painel.`)) return
+                if (!confirm(`Excluir ${selected.nome}? A candidatura e o currículo saem do painel.`)) return
                 void deleteCandidato(selected.id)
                   .then(() => setSelected(null))
                   .catch((err: unknown) => {
@@ -346,11 +350,13 @@ function KanbanColumn({
   status,
   items,
   onOpen,
+  onMove,
   onDelete,
 }: {
   status: CandidateStatus
   items: CandFull[]
   onOpen: (c: CandFull) => void
+  onMove: (id: string, status: CandidateStatus) => void
   onDelete: (c: CandFull) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status })
@@ -358,7 +364,7 @@ function KanbanColumn({
   return (
     <section
       ref={setNodeRef}
-      className={`flex max-h-[calc(100vh-200px)] w-[260px] min-w-[260px] flex-shrink-0 flex-col rounded-[14px] bg-[rgba(247,244,236,0.97)] shadow-xl ${
+      className={`flex max-h-[calc(100vh-200px)] w-[280px] min-w-[280px] flex-shrink-0 flex-col rounded-[14px] bg-[rgba(247,244,236,0.97)] shadow-xl ${
         isOver ? 'ring-2 ring-[var(--pv-terracotta)]' : ''
       }`}
     >
@@ -367,14 +373,20 @@ function KanbanColumn({
         <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold text-white">{items.length}</span>
       </div>
       <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-3">
-        <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext id={status} items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
           {items.map((cand) => (
-            <SortableCand key={cand.id} cand={cand} onOpen={() => onOpen(cand)} onDelete={() => onDelete(cand)} />
+            <SortableCand
+              key={cand.id}
+              cand={cand}
+              onOpen={() => onOpen(cand)}
+              onMove={onMove}
+              onDelete={() => onDelete(cand)}
+            />
           ))}
         </SortableContext>
         {items.length === 0 ? (
           <p className="py-6 text-center text-[12px] italic text-[#A9A493]">
-            {status === 'reprovada' ? 'Solte aqui para ir ao banco de talentos' : 'Arraste aqui'}
+            {status === 'reprovada' ? 'Solte aqui para ir ao banco de talentos' : 'Arraste o cartão para cá'}
           </p>
         ) : null}
       </div>
@@ -385,10 +397,12 @@ function KanbanColumn({
 function SortableCand({
   cand,
   onOpen,
+  onMove,
   onDelete,
 }: {
   cand: CandFull
   onOpen: () => void
+  onMove: (id: string, status: CandidateStatus) => void
   onDelete: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: cand.id })
@@ -396,8 +410,11 @@ function SortableCand({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      className="touch-none"
+      {...attributes}
+      {...listeners}
     >
-      <CandCard cand={cand} onOpen={onOpen} onDelete={onDelete} dragHandle={{ ...attributes, ...listeners }} />
+      <CandCard cand={cand} onOpen={onOpen} onMove={onMove} onDelete={onDelete} />
     </div>
   )
 }
@@ -405,32 +422,48 @@ function SortableCand({
 function CandCard({
   cand,
   onOpen,
+  onMove,
   onDelete,
   dragging,
-  dragHandle,
 }: {
   cand: CandFull
   onOpen?: () => void
+  onMove?: (id: string, status: CandidateStatus) => void
   onDelete?: () => void
   dragging?: boolean
-  dragHandle?: HTMLAttributes<HTMLButtonElement>
 }) {
   return (
     <div className={`rounded-[10px] border border-[#E7E2D3] bg-white p-3 shadow-sm ${dragging ? 'ring-2 ring-[var(--pv-terracotta)]' : ''}`}>
       <div className="flex items-start gap-2">
+        <span className="mt-0.5 text-[#A9A493]" aria-hidden>
+          <GripVertical size={14} />
+        </span>
         <button
           type="button"
-          className="mt-0.5 cursor-grab touch-none rounded-md p-1 text-[#A9A493] hover:bg-[#F1EDE0] hover:text-[var(--pv-navy)]"
-          aria-label={`Mover ${cand.nome}`}
-          {...dragHandle}
+          className="min-w-0 flex-1 text-left"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onOpen}
         >
-          <GripVertical size={14} />
-        </button>
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen}>
           <div className="text-sm font-bold text-[var(--pv-navy)]">{cand.nome}</div>
           <div className="mt-1 text-[11.5px] text-[#6B664F]">{cand.profile?.city || cand.profile?.desired_role || 'Candidato'}</div>
         </button>
       </div>
+      {onMove ? (
+        <label className="mt-2 block" onPointerDown={(event) => event.stopPropagation()}>
+          <span className="sr-only">Passar para outra etapa</span>
+          <select
+            className="w-full rounded-lg border border-[#E7E2D3] bg-[#FBF9F3] px-2 py-1.5 text-[11.5px] font-semibold text-[var(--pv-navy)]"
+            value={cand.status === 'reprovada' ? 'banco' : cand.status}
+            onChange={(event) => onMove(cand.id, event.target.value as CandidateStatus)}
+          >
+            {PIPELINE_ORDER.filter((status) => status !== 'reprovada').map((status) => (
+              <option key={status} value={status}>
+                {STATUS_META[status].label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {onDelete ? (
         <button
           type="button"

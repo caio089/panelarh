@@ -693,7 +693,7 @@ export function AdminCandidatesPage() {
                           className="font-semibold text-[#B23B3B] hover:underline"
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (!confirm(`Excluir ${c.nome}? A candidatura sai do painel.`)) return
+                            if (!confirm(`Excluir ${c.nome}? A candidatura e o currículo saem do painel.`)) return
                             void deleteCandidato(c.id)
                               .then(() => {
                                 setListError('')

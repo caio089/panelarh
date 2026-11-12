@@ -18,6 +18,7 @@ import {
   updateRemoteCandidato,
 } from '@/lib/candidatosDb'
 import { isCompleteCpf } from '@/lib/applicationForm'
+import { deleteCurriculo, deleteCurriculosDaVaga } from '@/lib/curriculoStorage'
 import { loadDemoStore, newId, resetDemoStore, saveDemoStore } from '@/lib/demo/storage'
 import { deleteRemoteVaga, insertVaga, listVagas, updateRemoteVaga } from '@/lib/vagasDb'
 
@@ -237,6 +238,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const deleteVaga = useCallback(async (vagaId: string) => {
     vagaWrite.current += 1
     candidatoWrite.current += 1
+    const resumeUrls = store.candidatos
+      .filter((candidato) => candidato.vaga_id === vagaId)
+      .map((candidato) => candidato.curriculo_url)
     await deleteRemoteVaga(vagaId)
     vagaWrite.current += 1
     candidatoWrite.current += 1
@@ -249,7 +253,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         messages: prev.messages.filter((m) => !removedCandidatoIds.has(m.candidato_id)),
       }
     })
-  }, [])
+    void deleteCurriculosDaVaga(vagaId, resumeUrls)
+  }, [store.candidatos])
 
   const updateCandidatoStatus = useCallback(
     (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => {
@@ -343,6 +348,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     try {
       await deleteRemoteCandidato(candidatoId)
       setCandidatosError('')
+      void deleteCurriculo(target?.curriculo_url)
       setStore((prev) => ({
         ...prev,
         candidatos: prev.candidatos.filter((candidato) => {
