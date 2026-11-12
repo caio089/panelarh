@@ -2,27 +2,28 @@ import { getCache } from '@vercel/functions'
 
 const cache = getCache({ namespace: 'panela-velha-competition' })
 
-function key(period, date, metric) {
-  return `${metric}:${period}:${date}`
+function key(period, date, metric, unitId) {
+  return `${metric}:${period}:${date}:${unitId}`
 }
 
-export async function readCompetitionCache(period, date, metric) {
+export async function readCompetitionCache(period, date, metric, unitId) {
   try {
-    const value = await cache.get(key(period, date, metric))
+    const value = await cache.get(key(period, date, metric, unitId))
     return value && typeof value === 'object' ? value : null
   } catch {
     return null
   }
 }
 
-export async function saveCompetitionCache(period, date, metric, payload) {
-  const options = { ttl: metric.startsWith('ranking-') ? 60 * 10 : period === 'mes' ? 60 * 60 * 12 : 60 * 60 * 36, tags: ['competition'], name: 'competition-scoreboard' }
+export async function saveCompetitionCache(period, date, metric, unitId, payload) {
+  const maxAge = metric.startsWith('ranking-') || period === 'mes' ? 60 * 10 : 60 * 2
   try {
-    await Promise.all([
-      cache.set(key(period, date, metric), payload, options),
-      cache.set(`${metric}:${period}:latest`, payload, options),
-    ])
+    await cache.set(key(period, date, metric, unitId), payload, {
+      ttl: maxAge,
+      tags: ['competition', unitId],
+      name: 'competition-scoreboard',
+    })
   } catch {
-    // The page can still use the source response if the cache is temporarily unavailable.
+    // A tela ainda usa a resposta da Saipos se o cache estiver indisponível.
   }
 }

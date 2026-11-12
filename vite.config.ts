@@ -52,6 +52,54 @@ function selecaoApi(apiKey: string): Plugin {
   }
 }
 
+function apiResponse(res: import('node:http').ServerResponse) {
+  return {
+    statusCode: 200,
+    setHeader(name: string, value: string) {
+      res.setHeader(name, value)
+    },
+    status(code: number) {
+      this.statusCode = code
+      res.statusCode = code
+      return this
+    },
+    json(body: unknown) {
+      res.statusCode = this.statusCode
+      if (!res.getHeader('Content-Type')) res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify(body))
+    },
+  }
+}
+
+/** No dev, /api/kds e /api/competition precisam responder JSON, não o fonte do arquivo. */
+function jsonRoute(prefix: string, moduleId: string): Plugin {
+  return {
+    name: `json-route-${prefix}`,
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url ?? ''
+        if (!url.startsWith(prefix)) return next()
+        try {
+          const parsed = new URL(url, 'http://127.0.0.1')
+          const query: Record<string, string> = {}
+          parsed.searchParams.forEach((value, key) => {
+            query[key] = value
+          })
+          Object.assign(req, { query })
+          const loaded = await server.ssrLoadModule(moduleId) as { default: (request: unknown, response: unknown) => Promise<void> }
+          await loaded.default(req, apiResponse(res))
+          if (!res.writableEnded) res.end()
+        } catch (error) {
+          if (res.writableEnded) return
+          res.statusCode = 500
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Falha na consulta.' }))
+        }
+      })
+    },
+  }
+}
+
 function dirceuApi(token: string): Plugin {
   return {
     name: 'dirceu-saipos',
@@ -92,8 +140,18 @@ function dirceuApi(token: string): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '')
+  for (const [key, value] of Object.entries(env)) {
+    if (!process.env[key]) process.env[key] = value
+  }
   return {
-    plugins: [react(), tailwindcss(), dirceuApi(env.API_SAIPOS ?? ''), selecaoApi(env.GROQ_API_KEY ?? '')],
+    plugins: [
+      react(),
+      tailwindcss(),
+      jsonRoute('/api/kds', '/api/kds.js'),
+      jsonRoute('/api/competition', '/api/competition.js'),
+      dirceuApi(env.API_SAIPOS ?? ''),
+      selecaoApi(env.GROQ_API_KEY ?? ''),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(rootDir, './src'),

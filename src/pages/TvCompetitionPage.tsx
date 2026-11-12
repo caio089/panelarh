@@ -1,6 +1,7 @@
 import { AlertTriangle, CalendarDays, CalendarRange, Clock3, RefreshCw, Store, Trophy } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { COMPETITION_UNIT_IDS, fetchCompetitionUnit, loadCompetitionUnits, type CompetitionUnitMetric } from '@/features/dirceu/competitionClient'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
 type UnitScore = {
@@ -13,11 +14,6 @@ type UnitScore = {
 type CompetitionPeriod = 'dia' | 'mes'
 type CompetitionView = 'placar' | 'ranking'
 type CompetitionScore = { name: string; salesPoints: number; kitchenPoints: number; total: number }
-
-type MonthlyRankingPayload = {
-  standings?: CompetitionScore[]
-  kitchenUnits?: Array<{ name: string; kitchenMinutes: number | null }>
-}
 
 type KdsOrder = {
   code: string
@@ -76,7 +72,6 @@ export function canonicalTvPath(pathname: string) {
 const REFRESH_MS = 60 * 1000
 const KDS_REFRESH_MS = 30 * 1000
 const KDS_RETRY_MS = 2 * 60 * 1000
-const PREPARE_REFRESH_MS = 40 * 1000
 const AUTO_SLIDE_MS = 60 * 1000
 const DAILY_RESULT_HOUR = 23
 const DAILY_RESULT_MINUTE = 40
@@ -97,10 +92,55 @@ function isNightServiceWindow(now = new Date()) {
   return minutes >= 17 * 60 + 30 && minutes < DAILY_RESULT_HOUR * 60 + DAILY_RESULT_MINUTE
 }
 
+async function readJson<T>(response: Response): Promise<T> {
+  const raw = await response.text()
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    throw new Error('A consulta da TV não devolveu dados válidos.')
+  }
+}
+
 function pointsForPosition(position: number) {
   if (position === 1) return 3
   if (position === 2) return 2
   return 0
+}
+
+function mergeCompetitionUnit(current: UnitScore[], unit: CompetitionUnitMetric, fields: { orders: boolean; kitchen: boolean }) {
+  const byName = new Map(current.map((item) => [item.name, item]))
+  const existing = byName.get(unit.name)
+  byName.set(unit.name, {
+    name: unit.name,
+    orders: fields.orders ? unit.orders ?? existing?.orders ?? 0 : existing?.orders ?? 0,
+    kitchenMinutes: fields.kitchen ? unit.kitchenMinutes ?? null : existing?.kitchenMinutes ?? null,
+    accent: ACCENTS[unit.name] ?? '#EFE3C4',
+  })
+  return [...byName.values()]
+}
+
+function standingsFromDays(series: Array<{ name: string; days: Array<{ orders: number; kitchenMinutes: number | null }> }>) {
+  const totals = new Map(series.map((item) => [item.name, { name: item.name, salesPoints: 0, kitchenPoints: 0, total: 0 }]))
+  const length = Math.max(0, ...series.map((item) => item.days.length))
+  for (let index = 0; index < length; index += 1) {
+    const units = series.map((item) => item.days[index] ?? { orders: 0, kitchenMinutes: null })
+    series.forEach((item, itemIndex) => {
+      const unit = units[itemIndex]
+      const salesPosition = 1 + units.filter((other) => other.orders > unit.orders).length
+      const kitchenScore = (value: { kitchenMinutes: number | null }) => -(value.kitchenMinutes ?? Number.POSITIVE_INFINITY)
+      const kitchenPosition = typeof unit.kitchenMinutes === 'number'
+        ? 1 + units.filter((other) => kitchenScore(other) > kitchenScore(unit)).length
+        : 0
+      const standing = totals.get(item.name)
+      if (!standing) return
+      const salesPoints = unit.orders > 0 ? pointsForPosition(salesPosition) : 0
+      const kitchenPoints = kitchenPosition ? pointsForPosition(kitchenPosition) : 0
+      standing.salesPoints += salesPoints
+      standing.kitchenPoints += kitchenPoints
+      standing.total += salesPoints + kitchenPoints
+    })
+  }
+  return [...totals.values()].sort((a, b) => b.total - a.total || b.salesPoints - a.salesPoints || a.name.localeCompare(b.name))
 }
 
 export function TvCompetitionPage() {
@@ -133,8 +173,13 @@ function CompetitionDashboard() {
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [automaticRefresh, setAutomaticRefresh] = useState(() => isNightServiceWindow())
-  const monthPrefetchDate = useRef<string | null>(null)
   const units = unitsByPeriod[period]
+  const unitOrder = useMemo(
+    () => (originUnit && TV_UNITS[originUnit]
+      ? [originUnit, ...COMPETITION_UNIT_IDS.filter((id) => id !== originUnit)]
+      : [...COMPETITION_UNIT_IDS]),
+    [originUnit],
+  )
 
   useEffect(() => {
     const updateSchedule = () => setAutomaticRefresh(isNightServiceWindow())
@@ -159,151 +204,79 @@ function CompetitionDashboard() {
 
   useEffect(() => {
     let alive = true
-    async function load() {
-      try {
-        const response = await fetch(`/api/competition?dia=${date}&periodo=${period}`)
-        const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
-        if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar o placar.')
-        if (!alive) return
-        setUnitsByPeriod((current) => ({ ...current, [period]: payload.units!.map((unit) => ({ ...unit, kitchenMinutes: unit.kitchenMinutes ?? null, accent: ACCENTS[unit.name] ?? '#EFE3C4' })) }))
-        setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt) : new Date())
-        setError('')
-        void loadKitchen()
-      } catch (reason) {
-        if (alive) setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o placar.')
-      }
+    const controller = new AbortController()
+    const filled = new Set<CompetitionPeriod>()
+    let lastKitchen = 0
+
+    const publish = (selected: CompetitionPeriod, unit: CompetitionUnitMetric, fields: { orders: boolean; kitchen: boolean }, fetchedAt?: string) => {
+      if (!alive) return
+      setUnitsByPeriod((current) => ({ ...current, [selected]: mergeCompetitionUnit(current[selected], unit, fields) }))
+      if (fetchedAt && fields.orders) setUpdatedAt(new Date(fetchedAt))
     }
 
-    async function loadKitchen() {
-      try {
-        const response = await fetch(period === 'mes'
-          ? `/api/competition?dia=${date}&modo=diario`
-          : `/api/competition?dia=${date}&periodo=dia&dados=cozinha`)
-        const payload = (await response.json()) as MonthlyRankingPayload & { units?: Omit<UnitScore, 'accent'>[] }
-        const kitchenUnits = period === 'mes' ? payload.kitchenUnits : payload.units
-        if (!response.ok || !kitchenUnits || !alive) return
-        const kitchens = new Map(kitchenUnits.map((unit) => [unit.name, unit.kitchenMinutes]))
-        setUnitsByPeriod((current) => ({ ...current, [period]: current[period].map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })) }))
-        if (period === 'mes' && payload.standings) setMonthlyScores(payload.standings)
-      } catch {
-        // O placar de vendas permanece disponível se a Saipos não responder a cozinha.
-      }
-    }
-
-    void load()
-    return () => {
-      alive = false
-    }
-  }, [date, period, refreshKey, view])
-
-  useEffect(() => {
-    if (view !== 'placar' || period !== 'dia' || unitsByPeriod.mes.length > 0 || monthPrefetchDate.current === date) return
-    monthPrefetchDate.current = date
-    let alive = true
-    async function prefetchMonth() {
-      const kitchenRequest = fetch(`/api/competition?dia=${date}&modo=diario`)
-        .then(async (response) => {
-          if (!response.ok) return null
-          return await response.json() as MonthlyRankingPayload
+    const loadPeriod = async (selected: CompetitionPeriod, withKitchen: boolean) => {
+      const sales = await loadCompetitionUnits({
+        unitIds: unitOrder,
+        date,
+        period: selected,
+        signal: controller.signal,
+        onUnit: (unit, fetchedAt) => publish(selected, unit, { orders: true, kitchen: false }, fetchedAt),
+      })
+      if (!alive || controller.signal.aborted) return sales
+      if (sales.loaded.length > 0) filled.add(selected)
+      if (withKitchen) {
+        await loadCompetitionUnits({
+          unitIds: unitOrder,
+          date,
+          period: selected,
+          kitchen: true,
+          signal: controller.signal,
+          onUnit: (unit) => publish(selected, unit, { orders: false, kitchen: true }),
         })
-        .catch(() => null)
-
-      try {
-        const salesResponse = await fetch(`/api/competition?dia=${date}&periodo=mes`)
-        const salesPayload = (await salesResponse.json()) as { units?: Omit<UnitScore, 'accent'>[] }
-        if (!salesResponse.ok || !salesPayload.units) throw new Error('Não foi possível carregar o placar mensal.')
-        if (!alive) return
-
-        // Publica as vendas assim que elas chegam. O consolidado mensal da
-        // cozinha é mais demorado e não pode impedir a troca da TV para o mês.
-        setUnitsByPeriod((current) => ({
-          ...current,
-          mes: salesPayload.units!.map((unit) => ({
-            ...unit,
-            kitchenMinutes: null,
-            accent: ACCENTS[unit.name] ?? '#EFE3C4',
-          })),
-        }))
-
-        const kitchenPayload = await kitchenRequest
-        if (!alive || !kitchenPayload?.kitchenUnits) return
-        const kitchens = new Map(kitchenPayload.kitchenUnits.map((unit) => [unit.name, unit.kitchenMinutes]))
-        setUnitsByPeriod((current) => ({
-          ...current,
-          mes: current.mes.map((unit) => ({ ...unit, kitchenMinutes: kitchens.get(unit.name) ?? null })),
-        }))
-        if (kitchenPayload.standings) setMonthlyScores(kitchenPayload.standings)
-      } catch {
-        monthPrefetchDate.current = null
+        lastKitchen = Date.now()
       }
-    }
-    void prefetchMonth()
-    return () => { alive = false }
-  }, [date, period, refreshKey, unitsByPeriod.mes.length, view])
-
-  useEffect(() => {
-    if (view !== 'placar' || !automaticRefresh || date !== currentCompetitionDay) return
-    let alive = true
-    let cycle = 0
-    let dueCycle = -1
-    const prepared = new Map<number, { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date }>()
-
-    const publish = (preparedCycle: number) => {
-      const next = prepared.get(preparedCycle)
-      if (!next || !alive) return
-      prepared.delete(preparedCycle)
-      if (next.sales) {
-        setUnitsByPeriod((current) => ({ ...current, dia: next.sales! }))
-        setUpdatedAt(next.fetchedAt ?? new Date())
-        setError('')
-      }
-      if (next.kitchen) {
-        setUnitsByPeriod((current) => ({ ...current, dia: current.dia.map((unit) => ({ ...unit, kitchenMinutes: next.kitchen!.get(unit.name) ?? null })) }))
-      }
+      return sales
     }
 
-    const prepare = async (preparedCycle: number) => {
-      const [salesResult, kitchenResult] = await Promise.allSettled([
-        fetch(`/api/competition?dia=${date}&periodo=dia&atualiza=1`, { cache: 'no-store' }),
-        fetch(`/api/competition?dia=${date}&periodo=dia&dados=cozinha&atualiza=1`, { cache: 'no-store' }),
-      ])
-      if (!alive || preparedCycle < dueCycle) return
-
-      const next: { sales?: UnitScore[]; kitchen?: Map<string, number | null>; fetchedAt?: Date } = {}
-      if (salesResult.status === 'fulfilled' && salesResult.value.ok) {
-        const payload = (await salesResult.value.json()) as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
-        if (payload.units) {
-          next.sales = payload.units.map((unit) => ({ ...unit, kitchenMinutes: unit.kitchenMinutes ?? null, accent: ACCENTS[unit.name] ?? '#EFE3C4' }))
-          next.fetchedAt = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date()
+    const loadRanking = async () => {
+      const series: Array<{ name: string; days: Array<{ orders: number; kitchenMinutes: number | null }> }> = []
+      for (const unitId of unitOrder) {
+        if (!alive || controller.signal.aborted) return
+        try {
+          const payload = await fetchCompetitionUnit({ unitId, date, period: 'mes', daily: true, signal: controller.signal })
+          if (!payload.unit || !payload.days) continue
+          series.push({ name: payload.unit.name, days: payload.days })
+          publish('mes', payload.unit, { orders: true, kitchen: true }, payload.fetchedAt)
+        } catch {
+          // Uma unidade sem série não impede o ranking das outras.
         }
       }
-      if (kitchenResult.status === 'fulfilled' && kitchenResult.value.ok) {
-        const payload = (await kitchenResult.value.json()) as { units?: Omit<UnitScore, 'accent'>[] }
-        if (payload.units) next.kitchen = new Map(payload.units.map((unit) => [unit.name, unit.kitchenMinutes]))
-      }
-      if (!next.sales && !next.kitchen) return
-      prepared.set(preparedCycle, next)
-      if (preparedCycle === dueCycle) publish(preparedCycle)
+      if (alive && series.length > 0) setMonthlyScores(standingsFromDays(series))
     }
 
-    const beginPreparation = () => { void prepare(cycle) }
-    const makeVisible = () => {
-      dueCycle = cycle
-      publish(cycle)
-      cycle += 1
+    const run = async () => {
+      if (view === 'ranking' && period === 'mes') {
+        await loadRanking()
+        filled.add('mes')
+      } else {
+        const sales = await loadPeriod(period, Date.now() - lastKitchen > 3 * 60 * 1000)
+        if (!alive) return
+        setError(sales.error || '')
+      }
+      const other: CompetitionPeriod = period === 'dia' ? 'mes' : 'dia'
+      if (!filled.has(other)) await loadPeriod(other, true)
     }
-    const prepareTimer = window.setTimeout(beginPreparation, PREPARE_REFRESH_MS)
-    const publishTimer = window.setTimeout(makeVisible, REFRESH_MS)
-    const prepareInterval = window.setInterval(beginPreparation, REFRESH_MS)
-    const publishInterval = window.setInterval(makeVisible, REFRESH_MS)
+
+    void run()
+    const timer = window.setInterval(() => {
+      if (automaticRefresh && period === 'dia' && date === currentCompetitionDay) void run()
+    }, REFRESH_MS)
     return () => {
       alive = false
-      window.clearTimeout(prepareTimer)
-      window.clearTimeout(publishTimer)
-      window.clearInterval(prepareInterval)
-      window.clearInterval(publishInterval)
+      controller.abort()
+      window.clearInterval(timer)
     }
-  }, [automaticRefresh, date, currentCompetitionDay, view])
+  }, [automaticRefresh, currentCompetitionDay, date, period, refreshKey, unitOrder, view])
 
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
@@ -432,6 +405,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
   const [metricsError, setMetricsError] = useState('')
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
   const today = todayInFortaleza()
+  const competitionDay = competitionDayInFortaleza()
 
   useEffect(() => {
     let alive = true
@@ -442,7 +416,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
         const response = await fetch(`/api/kds?unidade=${unitId}`, {
           cache: 'no-store',
         })
-        const payload = (await response.json()) as KdsPayload & { error?: string }
+        const payload = await readJson<KdsPayload & { error?: string }>(response)
         if (!response.ok) throw Object.assign(new Error(payload.error || 'Não foi possível atualizar o KDS.'), { status: response.status })
         if (!alive) return
         setData(payload)
@@ -473,46 +447,78 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
 
   useEffect(() => {
     let alive = true
-    const load = async () => {
-      const requests = (['dia', 'mes'] as CompetitionPeriod[]).flatMap((selectedPeriod) => [
-        fetch(`/api/competition?dia=${today}&periodo=${selectedPeriod}`, { cache: 'no-store' }),
-        fetch(`/api/competition?dia=${today}&periodo=${selectedPeriod}&dados=cozinha`, { cache: 'no-store' }),
-      ])
-      const results = await Promise.allSettled(requests)
+    const controller = new AbortController()
+    let timer: number | undefined
+    let lastKitchen = 0
+    let lastMonth = 0
+    const unitOrder = [unitId, ...COMPETITION_UNIT_IDS.filter((id) => id !== unitId)]
+
+    const publish = (selected: CompetitionPeriod, unit: CompetitionUnitMetric, fields: { orders: boolean; kitchen: boolean }, fetchedAt?: string) => {
       if (!alive) return
-      let received = 0
-      for (const [index, result] of results.entries()) {
-        if (result.status !== 'fulfilled' || !result.value.ok) continue
-        const payload = await result.value.json() as { fetchedAt?: string; units?: Omit<UnitScore, 'accent'>[] }
-        if (!alive || !payload.units) continue
-        const selectedPeriod: CompetitionPeriod = index < 2 ? 'dia' : 'mes'
-        const kitchenRequest = index % 2 === 1
-        setMetrics((current) => {
-          const previous = current[selectedPeriod]
-          const byName = new Map(previous.map((unit) => [unit.name, unit]))
-          for (const unit of payload.units!) {
-            const existing = byName.get(unit.name)
-            byName.set(unit.name, {
-              name: unit.name,
-              orders: kitchenRequest ? existing?.orders ?? 0 : unit.orders,
-              kitchenMinutes: kitchenRequest ? unit.kitchenMinutes ?? null : existing?.kitchenMinutes ?? null,
-              accent: ACCENTS[unit.name] ?? '#EFE3C4',
-            })
-          }
-          return { ...current, [selectedPeriod]: [...byName.values()] }
-        })
-        if (payload.fetchedAt) setUpdatedAt(new Date(payload.fetchedAt))
-        received += 1
-      }
-      setMetricsError(received === 0 ? 'Não foi possível atualizar vendas e tempos.' : '')
+      setMetrics((current) => ({ ...current, [selected]: mergeCompetitionUnit(current[selected], unit, fields) }))
+      if (fetchedAt && fields.orders) setUpdatedAt(new Date(fetchedAt))
     }
-    void load()
-    const timer = window.setInterval(() => { void load() }, REFRESH_MS)
+
+    const loadUnit = async (id: string, selected: CompetitionPeriod, withKitchen: boolean) => {
+      try {
+        const sales = await fetchCompetitionUnit({
+          unitId: id,
+          date: selected === 'dia' ? competitionDay : today,
+          period: selected,
+          signal: controller.signal,
+        })
+        if (sales.unit) publish(selected, sales.unit, { orders: true, kitchen: false }, sales.fetchedAt)
+      } catch (error) {
+        if (id === unitId) throw error
+        return
+      }
+      if (!withKitchen || !alive || controller.signal.aborted) return
+      try {
+        const kitchen = await fetchCompetitionUnit({
+          unitId: id,
+          date: selected === 'dia' ? competitionDay : today,
+          period: selected,
+          kitchen: true,
+          signal: controller.signal,
+        })
+        if (kitchen.unit) publish(selected, kitchen.unit, { orders: false, kitchen: true })
+      } catch {
+        // Vendas desta unidade continuam na tela se o tempo da cozinha atrasar.
+      }
+    }
+
+    const run = async () => {
+      const withKitchen = Date.now() - lastKitchen > 3 * 60 * 1000
+      try {
+        await loadUnit(unitId, 'dia', withKitchen)
+        if (alive) setMetricsError('')
+      } catch (error) {
+        if (!alive || controller.signal.aborted) return
+        setMetricsError(error instanceof Error ? error.message : 'Não foi possível atualizar vendas e tempos.')
+      }
+      for (const id of unitOrder) {
+        if (id === unitId || !alive || controller.signal.aborted) continue
+        await loadUnit(id, 'dia', withKitchen)
+      }
+      if (!alive) return
+      if (withKitchen) lastKitchen = Date.now()
+      if (Date.now() - lastMonth > 10 * 60 * 1000) {
+        for (const id of unitOrder) {
+          if (!alive || controller.signal.aborted) return
+          await loadUnit(id, 'mes', true)
+        }
+        if (alive) lastMonth = Date.now()
+      }
+      if (alive) timer = window.setTimeout(() => { void run() }, REFRESH_MS)
+    }
+
+    void run()
     return () => {
       alive = false
-      window.clearInterval(timer)
+      controller.abort()
+      if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [today])
+  }, [competitionDay, today, unitId])
 
   const urgentOrders = data?.queue.filter((order) => order.urgent) ?? []
   const activeOrders = data?.queue ?? []
@@ -538,13 +544,8 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
         </header>
 
         <section className="grid h-full min-h-0 grid-cols-2 gap-3 overflow-hidden lg:gap-4" style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}>
-          <TvPanel title="KDS agora" subtitle={`${data?.active ?? 0} pedidos ativos`} icon={<Store size={20} />}>
-            <div className="mb-2 grid grid-cols-3 gap-2">
-              <StatusPill label="Cozinha" value={data?.preparing ?? 0} />
-              <StatusPill label="Aguardando" value={data?.waiting ?? 0} />
-              <StatusPill label="Em entrega" value={data?.onTheWay ?? 0} />
-            </div>
-            <CompactOrderList orders={activeOrders} empty="Nenhum pedido na fila" />
+          <TvPanel title="KDS agora" subtitle={`${data?.preparing ?? 0} em preparo`} icon={<Store size={20} />}>
+            <CompactOrderList orders={activeOrders} empty="Nenhum pedido em preparo" />
           </TvPanel>
 
           <TvPanel title="Tempo médio" subtitle={`${periodLabel} · mesa e delivery`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
@@ -573,10 +574,6 @@ function TvPanel({ title, subtitle, icon, badge, urgent = false, children }: { t
     </div>
     <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
   </article>
-}
-
-function StatusPill({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-lg bg-white/[0.055] px-2 py-1.5 text-center"><strong className="font-display text-xl text-[#F4B942]">{value}</strong><p className="truncate text-[9px] font-bold uppercase tracking-[0.08em] text-white/45">{label}</p></div>
 }
 
 function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[]; empty: string; urgent?: boolean }) {

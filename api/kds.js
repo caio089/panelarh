@@ -1,4 +1,4 @@
-import { currentShiftDateInFortaleza, getSaiposKdsOrderDetails, getSaiposReport } from '../server/saiposDirceu.js'
+import { getSaiposKdsOrderDetails, getSaiposReport, shiftIsoDate, todayInFortaleza } from '../server/saiposDirceu.js'
 import { saiposUnit } from '../server/saiposUnits.js'
 import { readKdsCache, saveKdsCache } from '../server/kdsCache.js'
 import { waitUntil } from '@vercel/functions'
@@ -19,50 +19,70 @@ export default async function handler(req, res) {
   const unitId = typeof req.query?.unidade === 'string' ? req.query.unidade.trim().toLowerCase() : ''
   const unit = saiposUnit(unitId)
   if (!unit) return res.status(404).json({ error: 'Unidade não encontrada.' })
-  const date = currentShiftDateInFortaleza()
-  const cached = await readKdsCache(unit.id, date)
+  const today = todayInFortaleza()
+  // O turno da noite continua com a data de ontem até o dia seguinte começar.
+  // Os dois dias entram para o almoço não sumir enquanto a noite ainda está aberta.
+  const days = [shiftIsoDate(today, -1), today]
+  const cached = await readKdsCache(unit.id, today)
   if (cached && cacheIsFresh(cached)) {
     return res.status(200).json({ ...cached, cached: true, stale: false })
   }
 
   const loadFresh = async (signal) => {
-    const [payload, orderDetails] = await Promise.all([
-      getSaiposReport({
-        date,
-        category: 'cozinha',
-        period: 'dia',
-        token: unit.token(),
-        signal,
-        fresh: true,
-        unit: unit.name,
-        cacheScope: unit.id,
-      }),
-      getSaiposKdsOrderDetails({ date, token: unit.token(), signal, fresh: true, cacheScope: unit.id }),
-    ])
-    const report = payload.report || {}
-    const queue = Array.isArray(report.queue)
-      ? report.queue
-        .slice(0, 30)
-        .map((order) => ({ ...order, ...orderDetails.get(order.code) }))
-        .filter((order) => order.include !== false)
-        .map(({ include: _include, ...order }) => order)
-      : []
-    const preparing = queue.filter((order) => order.status === 'Cozinha').length
-    const waiting = queue.filter((order) => order.status === 'Aguardando Entrega').length
-    const onTheWay = queue.filter((order) => order.status === 'Saiu para entrega').length
+    const preparingOrders = []
+    let fetchedAt = new Date().toISOString()
+    let urgentAfterMinutes = 15
+    let loadedDays = 0
+    let failedDay = null
+    for (const day of days) {
+      try {
+        const [payload, orderDetails] = await Promise.all([
+          getSaiposReport({
+            date: day,
+            category: 'cozinha',
+            period: 'dia',
+            token: unit.token(),
+            signal,
+            fresh: true,
+            unit: unit.name,
+            cacheScope: unit.id,
+          }),
+          getSaiposKdsOrderDetails({ date: day, token: unit.token(), signal, fresh: true, cacheScope: unit.id }),
+        ])
+        fetchedAt = payload.fetchedAt || fetchedAt
+        urgentAfterMinutes = payload.report?.urgentAfterMinutes || urgentAfterMinutes
+        const queue = Array.isArray(payload.report?.queue) ? payload.report.queue : []
+        for (const order of queue) {
+          const detailed = { ...order, ...orderDetails.get(order.code) }
+          // Sai do quadro assim que a Saipos tira de Cozinha (entrega, finalizado ou cancelado).
+          if (detailed.status !== 'Cozinha' || detailed.include === false) continue
+          preparingOrders.push(detailed)
+        }
+        loadedDays += 1
+      } catch (error) {
+        if (signal?.aborted) throw error
+        failedDay = error
+      }
+    }
+    if (loadedDays === 0 && failedDay) throw failedDay
+    const byCode = new Map(preparingOrders.map((order) => [order.code, order]))
+    const queue = [...byCode.values()]
+      .sort((a, b) => (b.waitingMinutes ?? -1) - (a.waitingMinutes ?? -1) || a.code.localeCompare(b.code))
+      .slice(0, 30)
+      .map(({ include: _include, ...order }) => order)
     const response = {
       unit: unit.name,
-      date,
-      fetchedAt: payload.fetchedAt,
+      date: today,
+      fetchedAt,
       active: queue.length,
-      preparing,
-      waiting,
-      onTheWay,
+      preparing: queue.length,
+      waiting: 0,
+      onTheWay: 0,
       urgent: queue.filter((order) => order.urgent).length,
-      urgentAfterMinutes: report.urgentAfterMinutes || 15,
+      urgentAfterMinutes,
       queue,
     }
-    await saveKdsCache(unit.id, date, response)
+    await saveKdsCache(unit.id, today, response)
     return response
   }
 

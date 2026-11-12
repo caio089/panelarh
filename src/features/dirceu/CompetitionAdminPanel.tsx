@@ -2,6 +2,7 @@ import { ExternalLink, RefreshCw, ShoppingBag, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui'
+import { COMPETITION_UNIT_IDS, fetchCompetitionUnit } from '@/features/dirceu/competitionClient'
 
 type CompetitionUnit = {
   id: 'dirceu' | 'promorar' | 'mocambinho'
@@ -27,11 +28,22 @@ export function CompetitionAdminPanel() {
     async function load() {
       setLoading(true)
       try {
-        const response = await fetch('/api/competition', { signal: controller.signal })
-        const payload = (await response.json()) as { error?: string; fetchedAt?: string; units?: CompetitionUnit[] }
-        if (!response.ok || !payload.units) throw new Error(payload.error || 'Não foi possível atualizar a operação.')
-        setUnits(payload.units)
-        setUpdatedAt(payload.fetchedAt ? new Date(payload.fetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '')
+        const collected: CompetitionUnit[] = []
+        let failure = ''
+        for (const unitId of COMPETITION_UNIT_IDS) {
+          if (controller.signal.aborted) return
+          try {
+            const payload = await fetchCompetitionUnit({ unitId, period: 'dia', signal: controller.signal })
+            if (!payload.unit) continue
+            collected.push({ id: payload.unit.id as CompetitionUnit['id'], name: payload.unit.name, orders: payload.unit.orders ?? 0 })
+            setUnits([...collected])
+            if (payload.fetchedAt) setUpdatedAt(new Date(payload.fetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+          } catch (reason) {
+            if (reason instanceof DOMException && reason.name === 'AbortError') return
+            failure = reason instanceof Error ? reason.message : failure
+          }
+        }
+        if (!collected.length) throw new Error(failure || 'Não foi possível atualizar a operação.')
         setError('')
       } catch (reason) {
         if (reason instanceof DOMException && reason.name === 'AbortError') return

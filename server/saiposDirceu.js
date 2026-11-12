@@ -740,8 +740,9 @@ const CATEGORIES = {
   cozinha: {
     path: '/sales_status_histories',
     filter: 'shift_date',
-    pageSize: 20,
-    maxPages: 30,
+    // Uma página maior evita dezenas de chamadas para o mesmo turno.
+    pageSize: 100,
+    maxPages: 6,
     summarize: (rows) => summarizeKitchen(rows),
   },
   faturamento: { path: '/search_sales', filter: 'shift_date', summarize: (rows) => summarizeSales(rows) },
@@ -771,47 +772,13 @@ async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 
 
 async function* loadRangeSteps(spec, start, end, token, signal, fresh = false, cacheScope = 'dirceu') {
   const days = eachDay(start, end)
-  const collected = new Map()
-  const queue = []
-  let waiting = null
-  const wake = () => {
-    waiting?.()
-    waiting = null
-  }
-
+  const rows = []
   for (const [index, day] of days.entries()) {
-    void loadOneDay(spec, day, token, signal, fresh, cacheScope).then(
-      (rows) => {
-        queue.push({ index, rows })
-        wake()
-      },
-      (error) => {
-        queue.push({ index, error })
-        wake()
-      },
-    )
-  }
-
-  let received = 0
-  while (received < days.length) {
-    if (queue.length === 0) {
-      await new Promise((resolve) => {
-        waiting = resolve
-        if (queue.length > 0) wake()
-      })
-    }
-    while (queue.length > 0) {
-      const item = queue.shift()
-      if (item.error) throw item.error
-      received += 1
-      collected.set(item.index, item.rows)
-      const rows = []
-      for (let index = 0; index < days.length; index += 1) {
-        const batch = collected.get(index)
-        if (batch) rows.push(...batch)
-      }
-      yield { rows, partial: received < days.length }
-    }
+    if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
+    // Um dia por vez. Disparar o mês inteiro junto estoura o limite da Saipos.
+    const batch = await loadOneDay(spec, day, token, signal, fresh && day === end, cacheScope)
+    rows.push(...batch)
+    yield { rows: rows.slice(), partial: index < days.length - 1 }
   }
 }
 
@@ -987,13 +954,14 @@ export async function getSaiposCompetitionMetrics({ start, end, token, signal, f
   if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
 
   const days = eachDay(start, end)
-  const loaded = await Promise.all(days.map(async (day) => {
-    const [sales, histories] = await Promise.all([
-      loadOneDay(CATEGORIES.faturamento, day, token, signal, fresh, cacheScope),
-      loadOneDay(CATEGORIES.cozinha, day, token, signal, fresh, cacheScope),
-    ])
-    return { day, sales, histories }
-  }))
+  const loaded = []
+  for (const day of days) {
+    if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
+    const refreshDay = fresh && day === end
+    const sales = await loadOneDay(CATEGORIES.faturamento, day, token, signal, refreshDay, cacheScope)
+    const histories = await loadOneDay(CATEGORIES.cozinha, day, token, signal, refreshDay, cacheScope)
+    loaded.push({ day, sales, histories })
+  }
 
   const counts = new Map()
   const dailyKitchenMinutes = {}
