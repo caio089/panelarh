@@ -131,10 +131,13 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, si
     else missing.push(day)
   }
 
-  const hasAverage = [...snapshots.values()].some((snapshot) => snapshot.samples > 0)
-  const nextDay = [...missing].reverse().find((day) => day <= today)
+  const hasAverage = () => [...snapshots.values()].some((snapshot) => snapshot.samples > 0)
+  // Hoje de manhã ainda não tem movimento. O tempo do mês sai do último dia fechado.
+  const inlineDays = [...missing.filter((day) => day < today)].reverse()
+  if (inlineDays.length === 0) inlineDays.push(...[...missing].reverse())
   let failedDay = ''
-  if (!hasAverage && nextDay) {
+  const nextDay = inlineDays[0]
+  if (!hasAverage() && nextDay) {
     if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
     try {
       const snapshot = await loadDay({
@@ -153,7 +156,10 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, si
     }
   }
 
-  const stillMissing = [...days].reverse().filter((day) => !snapshots.has(day) && day !== failedDay)
+  const stillMissing = [
+    ...[...days].reverse().filter((day) => day < today && !snapshots.has(day) && day !== failedDay),
+    ...days.filter((day) => day >= today && !snapshots.has(day) && day !== failedDay),
+  ]
   const partial = days.some((day) => !snapshots.has(day))
   const totals = summarize(days, snapshots)
 
