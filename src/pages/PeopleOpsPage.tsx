@@ -173,22 +173,22 @@ function DpArea() {
           label="Saúde ocupacional"
           title="Atestados e afastamentos"
           description="Controle datas, período de afastamento, status e retorno ao trabalho por colaborador."
-          links={[]}
-        />
-        <ModuleCard
-          icon={<FileClock size={20} />}
-          label="Histórico funcional"
-          title="SID e ocorrências"
-          description="Registre o SID e mantenha o histórico funcional consultável pela responsável do RH."
-          links={[]}
-        />
-        <ModuleCard
-          icon={<FileText size={20} />}
-          label="Documentos"
-          title="Holerites e exames"
-          description="Central para holerites, exame admissional, periódicos, ASO, contratos e demais documentos."
-          links={[]}
-        />
+        links={[{ to: '/admin/colaboradores', label: 'Abrir o time' }]}
+      />
+      <ModuleCard
+        icon={<FileClock size={20} />}
+        label="Histórico funcional"
+        title="SID e ocorrências"
+        description="Registre o SID e mantenha o histórico funcional consultável pela responsável do RH."
+        links={[{ to: '/admin/colaboradores', label: 'Registrar no histórico' }]}
+      />
+      <ModuleCard
+        icon={<FileText size={20} />}
+        label="Documentos"
+        title="Holerites e exames"
+        description="Central para holerites, exame admissional, periódicos, ASO, contratos e demais documentos."
+        links={[{ to: '/admin/colaboradores', label: 'Registrar documento' }]}
+      />
       </div>
 
       <aside className="rounded-2xl border border-[#E6C9BE] bg-[#FFF8F4] p-4 text-sm text-[#704333]">
