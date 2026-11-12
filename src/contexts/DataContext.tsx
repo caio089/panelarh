@@ -11,12 +11,14 @@ import {
 import type { CandidateStatus, Candidato, Unit, Vaga } from '@/types'
 import type { AppStore } from '@/lib/data'
 import {
+  candidatoIdentity,
   candidatoKey,
   deleteRemoteCandidato,
   insertCandidato,
   listCandidatos,
   updateRemoteCandidato,
 } from '@/lib/candidatosDb'
+import { isCompleteCpf } from '@/lib/applicationForm'
 import { loadDemoStore, newId, resetDemoStore, saveDemoStore } from '@/lib/demo/storage'
 import { deleteRemoteVaga, insertVaga, listVagas, updateRemoteVaga } from '@/lib/vagasDb'
 
@@ -149,11 +151,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const vagaIds = new Set(vagas.map((vaga) => vaga.id))
       const known = new Set(listed.map((candidato) => candidato.id))
       const knownKeys = new Set(listed.map((candidato) => candidatoKey(candidato)))
+      const knownPeople = new Set(listed.map((candidato) => candidatoIdentity(candidato)))
       const pending = loadDemoStore().candidatos.filter(
         (candidato) =>
           vagaIds.has(candidato.vaga_id) &&
           !known.has(candidato.id) &&
-          !knownKeys.has(candidatoKey(candidato)),
+          !knownKeys.has(candidatoKey(candidato)) &&
+          !knownPeople.has(candidatoIdentity(candidato)),
       )
 
       const keptLocal = []
@@ -163,6 +167,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
             const saved = await insertCandidato({
               vagaId: candidato.vaga_id,
               nome: candidato.nome,
+              cpf: candidato.cpf,
               experiencia: candidato.experiencia,
               info: candidato.info_complementar,
               criadoEm: candidato.criado_em,
@@ -177,13 +182,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
               saved.data_inicio_treinamento = status === 'aprovada' ? candidato.data_inicio_treinamento : null
             }
             listed.push(saved)
+            knownPeople.add(candidatoIdentity(saved))
           } catch {
-            keptLocal.push(candidato)
+            if (!knownPeople.has(candidatoIdentity(candidato))) keptLocal.push(candidato)
           }
         }
         if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
       }
-      const candidatos = [...listed, ...keptLocal].sort((a, b) => +new Date(b.criado_em) - +new Date(a.criado_em))
+      const candidatos = [...listed, ...keptLocal]
+        .filter((candidato, index, all) => all.findIndex((item) => candidatoIdentity(item) === candidatoIdentity(candidato)) === index)
+        .sort((a, b) => +new Date(b.criado_em) - +new Date(a.criado_em))
 
       setVagasError('')
       setCandidatosError('')
@@ -376,12 +384,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
         return { error: 'Esta vaga não está mais disponível.' }
       }
       if (input.nome.trim().length < 2) return { error: 'Informe seu nome.' }
+      if (!isCompleteCpf(input.cpf)) return { error: 'Informe um CPF válido.' }
 
       candidatoWrite.current += 1
       try {
         const candidato = await insertCandidato({
           vagaId: input.vagaId,
           nome: input.nome,
+          cpf: input.cpf,
           experiencia: input.experience || null,
           info: buildPublicApplicationInfo(input),
         })

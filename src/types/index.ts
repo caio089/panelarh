@@ -75,6 +75,7 @@ export interface Candidato {
   vaga_id: string
   profile_id: string | null
   nome: string
+  cpf: string | null
   info_complementar: string | null
   experiencia: string | null
   referencia: string | null

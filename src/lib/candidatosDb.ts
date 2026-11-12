@@ -1,4 +1,5 @@
 import type { CandidateStatus, Candidato } from '@/types'
+import { cpfFromInfo, digitsCpf, isCompleteCpf } from '@/lib/applicationForm'
 import { getSupabase } from '@/lib/supabaseClient'
 
 const STATUSES = new Set<CandidateStatus>(['pendente', 'entrevista', 'aprovada', 'reprovada', 'banco'])
@@ -7,6 +8,7 @@ type CandidatoRow = {
   id: string
   vaga_id: string
   nome: string
+  cpf: string | null
   info_complementar: string | null
   experiencia: string | null
   referencia: string | null
@@ -18,7 +20,7 @@ type CandidatoRow = {
 }
 
 const COLUMNS =
-  'id, vaga_id, nome, info_complementar, experiencia, referencia, status, data_inicio_treinamento, curriculo_url, curriculo_nome, criado_em'
+  'id, vaga_id, nome, cpf, info_complementar, experiencia, referencia, status, data_inicio_treinamento, curriculo_url, curriculo_nome, criado_em'
 
 function requireDatabase() {
   const supabase = getSupabase()
@@ -33,6 +35,7 @@ function toCandidato(row: CandidatoRow): Candidato {
     vaga_id: row.vaga_id,
     profile_id: null,
     nome: row.nome,
+    cpf: row.cpf || cpfFromInfo(row.info_complementar) || null,
     info_complementar: row.info_complementar,
     experiencia: row.experiencia,
     referencia: row.referencia,
@@ -48,6 +51,13 @@ export function candidatoKey(candidato: Pick<Candidato, 'vaga_id' | 'nome' | 'cr
   return `${candidato.vaga_id}|${candidato.nome.trim().toLowerCase()}|${candidato.criado_em}`
 }
 
+/** Mesma pessoa: CPF. Sem CPF, cai no par vaga + nome. */
+export function candidatoIdentity(candidato: Pick<Candidato, 'vaga_id' | 'nome' | 'cpf' | 'info_complementar'>) {
+  const cpf = candidato.cpf || cpfFromInfo(candidato.info_complementar)
+  if (isCompleteCpf(cpf)) return `cpf:${digitsCpf(cpf)}`
+  return `${candidato.vaga_id}|nome:${candidato.nome.trim().toLowerCase()}`
+}
+
 /** Lista compartilhada. Qualquer navegador do painel lê estes registros. */
 export async function listCandidatos(): Promise<Candidato[]> {
   const supabase = requireDatabase()
@@ -59,18 +69,26 @@ export async function listCandidatos(): Promise<Candidato[]> {
 export async function insertCandidato(input: {
   vagaId: string
   nome: string
+  cpf?: string | null
   experiencia: string | null
   info: string | null
   criadoEm?: string
 }): Promise<Candidato> {
   const supabase = requireDatabase()
   const nome = input.nome.trim()
+  const cpf = digitsCpf(input.cpf || cpfFromInfo(input.info) || '')
   if (nome.length < 2) throw new Error('Informe o nome completo.')
+  if (!isCompleteCpf(cpf)) throw new Error('Informe um CPF válido.')
+
+  const { data: already } = await supabase.from('candidatos').select('id').eq('cpf', cpf).maybeSingle()
+  if (already) throw new Error('Este CPF já possui uma candidatura. O RH já recebeu seus dados.')
+
   const { data, error } = await supabase
     .from('candidatos')
     .insert({
       vaga_id: input.vagaId,
       nome,
+      cpf,
       experiencia: input.experiencia,
       info_complementar: input.info,
       status: 'pendente',
@@ -78,6 +96,7 @@ export async function insertCandidato(input: {
     })
     .select(COLUMNS)
     .single()
+  if (error?.code === '23505') throw new Error('Este CPF já possui uma candidatura. O RH já recebeu seus dados.')
   if (error || !data) throw new Error('Não foi possível registrar a candidatura.')
   return toCandidato(data as CandidatoRow)
 }

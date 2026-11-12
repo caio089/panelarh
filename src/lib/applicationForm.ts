@@ -67,8 +67,22 @@ export function clearApplyDraft(vagaId: string) {
   sessionStorage.removeItem(applyDraftKey(vagaId))
 }
 
+export function digitsCpf(value: string) {
+  return value.replace(/\D/g, '').slice(0, 11)
+}
+
+export function isCompleteCpf(value: string) {
+  return digitsCpf(value).length === 11
+}
+
+export function cpfFromInfo(info: string | null | undefined) {
+  if (!info) return ''
+  const match = info.match(/CPF:\s*([0-9.\-\s]{11,18})/i)
+  return match ? digitsCpf(match[1]) : ''
+}
+
 export function formatCpf(digits: string) {
-  const value = digits.replace(/\D/g, '').slice(0, 11)
+  const value = digitsCpf(digits)
   if (value.length <= 3) return value
   if (value.length <= 6) return `${value.slice(0, 3)}.${value.slice(3)}`
   if (value.length <= 9) return `${value.slice(0, 3)}.${value.slice(3, 6)}.${value.slice(6)}`
