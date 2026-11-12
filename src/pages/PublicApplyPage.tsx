@@ -1,24 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, Paperclip, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import {
   COMMUTE_OPTIONS,
   FORM_SHIFTS,
+  FORM_STEPS,
+  HOLIDAY_OPTIONS,
   RESTAURANT_OPTIONS,
+  ROLE_OPTIONS,
+  SOURCE_OPTIONS,
+  STANDING_OPTIONS,
   START_OPTIONS,
   WEEKEND_OPTIONS,
+  WORK_CARD_OPTIONS,
   clearApplyDraft,
+  emptyApplyDraft,
   formatCpf,
   formatPhone,
+  isValidAge,
   loadApplyDraft,
   saveApplyDraft,
 } from '@/lib/applicationForm'
+import { assertResumeFile, resumeFileLabel, uploadCurriculo } from '@/lib/curriculoStorage'
+import { HOUSE_UNITS } from '@/lib/demo/seedData'
 import { PublicHeader, PublicFooter } from '@/components/Layout'
 import { Alert, Button, Field, Input, Select, Textarea } from '@/components/ui'
 
-const STEPS = ['Contato', 'Horário', 'Experiência'] as const
+const LAST_STEP = FORM_STEPS.length - 1
+const HOUSE_NAMES = new Set(HOUSE_UNITS.map((unit) => unit.name))
 
 export function PublicApplyPage() {
   const { id } = useParams()
@@ -28,29 +39,29 @@ export function PublicApplyPage() {
 
   const vaga = id ? getVaga(id) : undefined
   const saved = id ? loadApplyDraft(id) : null
+  const blank = emptyApplyDraft()
   const submitted = useRef(false)
 
   const [step, setStep] = useState(saved?.step ?? 0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
-  const [personal, setPersonal] = useState(
-    saved?.personal ?? { full_name: '', cpf: '', phone: '', city: '' },
-  )
+  const [personal, setPersonal] = useState(saved?.personal ?? blank.personal)
   const [job, setJob] = useState(
-    saved?.job ?? { preferred_unit: vaga?.unitName || '', weekend: '', commute: '' },
+    saved?.job ?? { ...blank.job, preferred_unit: vaga?.unitName && HOUSE_NAMES.has(vaga.unitName) ? vaga.unitName : '' },
   )
   const [shifts, setShifts] = useState<string[]>(saved?.shifts ?? [])
-  const [experience, setExperience] = useState(
-    saved?.experience ?? { worked: '', detail: '', daily: '', why: '', start: '' },
-  )
+  const [experience, setExperience] = useState(saved?.experience ?? blank.experience)
+  const [extra, setExtra] = useState(saved?.extra ?? blank.extra)
+  const [resume, setResume] = useState<File | null>(null)
 
-  const progress = useMemo(() => ((step + 1) / STEPS.length) * 100, [step])
+  const progress = useMemo(() => ((step + 1) / FORM_STEPS.length) * 100, [step])
+  const houseUnits = store.units.filter((unit) => HOUSE_NAMES.has(unit.name))
 
   useEffect(() => {
     if (!id || submitted.current) return
-    saveApplyDraft(id, { step, personal, job, shifts, experience })
-  }, [id, step, personal, job, shifts, experience])
+    saveApplyDraft(id, { step, personal, job, shifts, experience, extra })
+  }, [id, step, personal, job, shifts, experience, extra])
 
   if (!sharedReady) {
     return (
@@ -88,6 +99,28 @@ export function PublicApplyPage() {
     setShifts((prev) => (prev.includes(shift) ? prev.filter((item) => item !== shift) : [...prev, shift]))
   }
 
+  function toggleRole(role: string) {
+    setExperience((prev) => ({
+      ...prev,
+      roles: prev.roles.includes(role) ? prev.roles.filter((item) => item !== role) : [...prev.roles, role],
+    }))
+  }
+
+  function pickResume(file: File | null) {
+    if (!file) {
+      setResume(null)
+      return
+    }
+    try {
+      assertResumeFile(file)
+      setError('')
+      setResume(file)
+    } catch (err) {
+      setResume(null)
+      setError(err instanceof Error ? err.message : 'Arquivo inválido.')
+    }
+  }
+
   async function nextStep() {
     setError('')
     try {
@@ -95,41 +128,65 @@ export function PublicApplyPage() {
         if (!personal.full_name.trim() || personal.cpf.length !== 11 || personal.phone.length < 10 || !personal.city.trim()) {
           throw new Error('Preencha nome, CPF, WhatsApp e bairro.')
         }
+        if (!isValidAge(personal.age)) throw new Error('Informe uma idade entre 16 e 70 anos.')
       }
       if (step === 1) {
-        if (!job.preferred_unit || !job.weekend || !job.commute || shifts.length === 0) {
-          throw new Error('Escolha a unidade, os turnos, o fim de semana e como você chega.')
+        if (!job.preferred_unit || !job.weekend || !job.commute || !job.holidays || shifts.length === 0) {
+          throw new Error('Escolha a unidade, os turnos, o fim de semana, os feriados e como você chega.')
         }
       }
-      if (step < STEPS.length - 1) {
+      if (step === 2) {
+        if (!experience.worked || !experience.start) {
+          throw new Error('Diga se já trabalhou em restaurante e quando pode começar.')
+        }
+        if (experience.roles.length === 0) throw new Error('Marque o que você já fez, mesmo que seja o primeiro emprego.')
+        if (experience.detail.trim().length < 20 || experience.daily.trim().length < 20 || experience.why.trim().length < 20) {
+          throw new Error('Escreva um pouco mais nos três textos. O RH precisa entender seu trabalho.')
+        }
+      }
+      if (step < LAST_STEP) {
         setStep((current) => current + 1)
         return
       }
 
-      if (!experience.worked || !experience.start) {
-        throw new Error('Diga se já trabalhou em restaurante e quando pode começar.')
-      }
-      if (experience.detail.trim().length < 20 || experience.daily.trim().length < 20 || experience.why.trim().length < 20) {
-        throw new Error('Escreva um pouco mais nos três textos. O RH precisa entender seu trabalho.')
+      if (!extra.workCard || !extra.source || !extra.standing) {
+        throw new Error('Responda carteira de trabalho, como soube da vaga e se aguenta o turno em pé.')
       }
 
       if (!vaga || !id) return
       setSaving(true)
+      let curriculoUrl: string | null = null
+      let curriculoNome: string | null = null
+      if (resume) {
+        const uploaded = await uploadCurriculo(resume, vaga.id)
+        curriculoUrl = uploaded.url
+        curriculoNome = uploaded.nome
+      }
       const result = await submitPublicApplication({
         vagaId: vaga.id,
         nome: personal.full_name.trim(),
         cpf: personal.cpf,
         phone: personal.phone,
         city: personal.city.trim(),
+        age: personal.age,
         preferredUnit: job.preferred_unit,
         shifts: shifts.join(', '),
         weekendAvailability: job.weekend,
         commute: job.commute,
+        holidays: job.holidays,
         workedRestaurant: experience.worked,
+        roles: experience.roles.join(', '),
         experience: experience.detail.trim(),
         dailyWork: experience.daily.trim(),
         whyRole: experience.why.trim(),
         startWhen: experience.start,
+        workCard: extra.workCard,
+        source: extra.source,
+        standing: extra.standing,
+        restriction: extra.restriction.trim(),
+        reference: extra.reference.trim(),
+        curriculoUrl,
+        curriculoNome,
       })
       setSaving(false)
       if (result.error) {
@@ -183,14 +240,14 @@ export function PublicApplyPage() {
           <p className="pv-eyebrow">Candidatura</p>
           <h1 className="mt-1 font-display text-2xl text-[var(--pv-navy)] sm:text-3xl">{vaga.titulo}</h1>
           <p className="mt-1 text-sm text-[var(--pv-muted)]">
-            {vaga.unitName || 'Panela Velha'} · três passos curtos. Se sair e voltar, as respostas continuam aqui.
+            {vaga.unitName || 'Panela Velha'} · quatro passos. Se sair e voltar, as respostas continuam aqui.
           </p>
 
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-[#E7E2D3]">
             <div className="h-full bg-[var(--pv-terracotta)] transition-all" style={{ width: `${progress}%` }} />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {STEPS.map((label, index) => (
+            {FORM_STEPS.map((label, index) => (
               <button
                 key={label}
                 type="button"
@@ -248,6 +305,16 @@ export function PublicApplyPage() {
                     placeholder="000.000.000-00"
                   />
                 </Field>
+                <Field label="Idade *" hint="Precisa ter pelo menos 16 anos">
+                  <Input
+                    inputMode="numeric"
+                    value={personal.age}
+                    onChange={(event) =>
+                      setPersonal({ ...personal, age: event.target.value.replace(/\D/g, '').slice(0, 2) })
+                    }
+                    placeholder="Ex.: 24"
+                  />
+                </Field>
               </>
             ) : null}
 
@@ -259,7 +326,7 @@ export function PublicApplyPage() {
                     onChange={(event) => setJob({ ...job, preferred_unit: event.target.value })}
                   >
                     <option value="">Selecione</option>
-                    {store.units.map((unit) => (
+                    {houseUnits.map((unit) => (
                       <option key={unit.id} value={unit.name}>
                         {unit.name}
                       </option>
@@ -279,6 +346,12 @@ export function PublicApplyPage() {
                   onChange={(weekend) => setJob({ ...job, weekend })}
                 />
                 <Choices
+                  label="Pode trabalhar em feriados? *"
+                  value={job.holidays}
+                  options={HOLIDAY_OPTIONS}
+                  onChange={(holidays) => setJob({ ...job, holidays })}
+                />
+                <Choices
                   label="Como você chega no trabalho? *"
                   value={job.commute}
                   options={COMMUTE_OPTIONS}
@@ -294,6 +367,12 @@ export function PublicApplyPage() {
                   value={experience.worked}
                   options={RESTAURANT_OPTIONS}
                   onChange={(worked) => setExperience({ ...experience, worked })}
+                />
+                <Choices
+                  label="O que você já fez? *"
+                  values={experience.roles}
+                  options={ROLE_OPTIONS}
+                  onToggle={toggleRole}
                 />
                 <Field
                   label="Último trabalho *"
@@ -330,6 +409,72 @@ export function PublicApplyPage() {
                 />
               </>
             ) : null}
+
+            {step === 3 ? (
+              <>
+                <Choices
+                  label="Tem carteira de trabalho? *"
+                  value={extra.workCard}
+                  options={WORK_CARD_OPTIONS}
+                  onChange={(workCard) => setExtra({ ...extra, workCard })}
+                />
+                <Choices
+                  label="Como ficou sabendo da vaga? *"
+                  value={extra.source}
+                  options={SOURCE_OPTIONS}
+                  onChange={(source) => setExtra({ ...extra, source })}
+                />
+                <Choices
+                  label="Consegue ficar o turno inteiro em pé? *"
+                  value={extra.standing}
+                  options={STANDING_OPTIONS}
+                  onChange={(standing) => setExtra({ ...extra, standing })}
+                />
+                <Field label="Alguém que confirme seu último trabalho" hint="Nome e WhatsApp. Se for o primeiro emprego, deixe em branco.">
+                  <Input
+                    value={extra.reference}
+                    onChange={(event) => setExtra({ ...extra, reference: event.target.value })}
+                    placeholder="Ex.: Maria, (86) 90000-0000"
+                  />
+                </Field>
+                <Field label="Alguma restrição de horário?" hint="Opcional">
+                  <Textarea
+                    rows={2}
+                    value={extra.restriction}
+                    onChange={(event) => setExtra({ ...extra, restriction: event.target.value })}
+                    placeholder="Ex.: Preciso sair às terças até 18h."
+                  />
+                </Field>
+                <div>
+                  <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
+                    Currículo (opcional)
+                  </p>
+                  <p className="mb-2 text-xs text-[var(--pv-muted)]">PDF, Word ou foto. Até 5 MB. Quem já se candidatou sem arquivo continua no painel.</p>
+                  <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--pv-line-strong)] bg-[#FBF9F3] px-3.5 py-3 text-sm text-[var(--pv-navy)] hover:bg-[#F1EDE0]">
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <Paperclip size={16} />
+                      <span className="truncate">{resumeFileLabel(resume)}</span>
+                    </span>
+                    <span className="shrink-0 font-bold text-[var(--pv-terracotta)]">{resume ? 'Trocar' : 'Anexar'}</span>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                      className="sr-only"
+                      onChange={(event) => pickResume(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  {resume ? (
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[var(--pv-muted)] hover:text-[var(--pv-navy)]"
+                      onClick={() => setResume(null)}
+                    >
+                      <X size={12} /> Remover arquivo
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
           </div>
 
           {error ? (
@@ -350,7 +495,7 @@ export function PublicApplyPage() {
               Voltar
             </Button>
             <Button onClick={() => void nextStep()} disabled={saving}>
-              {saving ? 'Enviando…' : step === STEPS.length - 1 ? 'Enviar candidatura' : 'Continuar'}
+              {saving ? 'Enviando…' : step === LAST_STEP ? 'Enviar candidatura' : 'Continuar'}
             </Button>
           </div>
         </div>

@@ -59,15 +59,25 @@ interface PublicApplicationInput {
   cpf: string
   phone: string
   city: string
+  age: string
   preferredUnit: string
   shifts: string
   weekendAvailability: string
   commute: string
+  holidays: string
   workedRestaurant: string
+  roles: string
   experience: string
   dailyWork: string
   whyRole: string
   startWhen: string
+  workCard: string
+  source: string
+  standing: string
+  restriction: string
+  reference: string
+  curriculoUrl?: string | null
+  curriculoNome?: string | null
 }
 
 interface DataContextValue {
@@ -112,21 +122,36 @@ function oneLine(value: string) {
   return value.replace(/\s+/g, ' ').trim()
 }
 
+function optionalLine(label: string, value: string) {
+  const text = oneLine(value)
+  return text ? `${label}: ${text}` : ''
+}
+
 function buildPublicApplicationInfo(input: PublicApplicationInput) {
   return [
     `WhatsApp: ${input.phone}`,
     `CPF: ${input.cpf}`,
     `Bairro: ${input.city}`,
+    optionalLine('Idade', input.age),
     `Unidade: ${input.preferredUnit}`,
     `Turnos: ${input.shifts}`,
     `Fim de semana: ${input.weekendAvailability}`,
     `Como chega: ${input.commute}`,
+    optionalLine('Feriados', input.holidays),
     `Restaurante: ${input.workedRestaurant}`,
+    optionalLine('Funções', input.roles),
     `Último trabalho: ${oneLine(input.experience)}`,
     `No dia a dia: ${oneLine(input.dailyWork)}`,
     `Por que a vaga: ${oneLine(input.whyRole)}`,
     `Começa: ${input.startWhen}`,
-  ].join('\n')
+    optionalLine('Carteira de trabalho', input.workCard),
+    optionalLine('Como soube', input.source),
+    optionalLine('Fica em pé', input.standing),
+    optionalLine('Restrição de horário', input.restriction),
+    optionalLine('Referência', input.reference),
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -170,6 +195,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
               cpf: candidato.cpf,
               experiencia: candidato.experiencia,
               info: candidato.info_complementar,
+              referencia: candidato.referencia,
+              curriculoUrl: candidato.curriculo_url,
+              curriculoNome: candidato.curriculo_nome,
               criadoEm: candidato.criado_em,
             })
             const status: CandidateStatus = candidato.status === 'reprovada' ? 'banco' : candidato.status
@@ -394,6 +422,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
           cpf: input.cpf,
           experiencia: input.experience || null,
           info: buildPublicApplicationInfo(input),
+          referencia: input.reference.trim() || null,
+          curriculoUrl: input.curriculoUrl || null,
+          curriculoNome: input.curriculoNome || null,
         })
         candidatoWrite.current += 1
         setCandidatosError('')

@@ -6,7 +6,7 @@ export function ProfileAnswers({
   candidato,
 }: {
   profile?: Profile | null
-  candidato?: Pick<Candidato, 'nome' | 'info_complementar' | 'experiencia'> | null
+  candidato?: Pick<Candidato, 'nome' | 'info_complementar' | 'experiencia' | 'curriculo_url' | 'curriculo_nome' | 'referencia'> | null
 }) {
   if (profile) {
     const rows: Array<[string, string]> = [
@@ -43,7 +43,7 @@ export function ProfileAnswers({
     return <p className="text-sm italic text-[#A9A493]">Sem dados de perfil</p>
   }
 
-  const storyLabels = ['Sobre', 'Motivação', 'Último trabalho', 'No dia a dia', 'Por que a vaga']
+  const storyLabels = ['Sobre', 'Motivação', 'Último trabalho', 'No dia a dia', 'Por que a vaga', 'Restrição de horário']
   const infoRows = rowsFromCandidatoInfo(candidato.info_complementar)
   const rows = infoRows.filter(
     ([label]) => !storyLabels.includes(label) && !label.toLowerCase().startsWith('disc'),
@@ -52,6 +52,9 @@ export function ProfileAnswers({
   const why = infoRows.find(([label]) => label === 'Motivação' || label === 'Por que a vaga')?.[1]
   const lastJob = infoRows.find(([label]) => label === 'Último trabalho')?.[1]
   const daily = infoRows.find(([label]) => label === 'No dia a dia')?.[1]
+  const restriction = infoRows.find(([label]) => label === 'Restrição de horário')?.[1]
+  const resumeUrl = candidato.curriculo_url
+  const resumeName = candidato.curriculo_nome || 'Abrir currículo'
 
   return (
     <div className="space-y-3 text-sm text-[#4A4636]">
@@ -70,6 +73,20 @@ export function ProfileAnswers({
       {!lastJob && candidato.experiencia ? <Block title="Experiência relevante" text={candidato.experiencia} /> : null}
       {daily ? <Block title="No dia a dia" text={daily} /> : null}
       {why ? <Block title="Por que a vaga" text={why} /> : null}
+      {restriction ? <Block title="Restrição de horário" text={restriction} /> : null}
+      {candidato.referencia && !rows.some(([label]) => label === 'Referência') ? (
+        <Block title="Referência" text={candidato.referencia} />
+      ) : null}
+      {resumeUrl ? (
+        <a
+          href={resumeUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center rounded-xl border border-[var(--pv-line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--pv-terracotta)] hover:bg-[#F8E8E3]"
+        >
+          Currículo: {resumeName}
+        </a>
+      ) : null}
     </div>
   )
 }

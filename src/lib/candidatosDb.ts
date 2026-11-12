@@ -72,6 +72,9 @@ export async function insertCandidato(input: {
   cpf?: string | null
   experiencia: string | null
   info: string | null
+  referencia?: string | null
+  curriculoUrl?: string | null
+  curriculoNome?: string | null
   criadoEm?: string
 }): Promise<Candidato> {
   const supabase = requireDatabase()
@@ -91,6 +94,9 @@ export async function insertCandidato(input: {
       cpf,
       experiencia: input.experiencia,
       info_complementar: input.info,
+      referencia: input.referencia || null,
+      curriculo_url: input.curriculoUrl || null,
+      curriculo_nome: input.curriculoNome || null,
       status: 'pendente',
       criado_em: input.criadoEm,
     })

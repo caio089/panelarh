@@ -23,7 +23,13 @@ export function loadDemoStore(): AppStore {
         const units = withHouseUnits(parsed.units)
         const candidatos = parsed.candidatos.map((candidato) => {
           const next = candidato.status === 'reprovada' ? { ...candidato, status: 'banco' as const } : candidato
-          return { ...next, cpf: next.cpf ?? null }
+          return {
+            ...next,
+            cpf: next.cpf ?? null,
+            curriculo_url: next.curriculo_url ?? null,
+            curriculo_nome: next.curriculo_nome ?? null,
+            referencia: next.referencia ?? null,
+          }
         })
         const movedToBank = candidatos.some((candidato, index) => candidato !== parsed.candidatos[index])
         if (units.length !== parsed.units.length || movedToBank) {
