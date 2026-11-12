@@ -590,11 +590,11 @@ function CompactOrderList({ orders, empty, urgent = false }: { orders: KdsOrder[
 
 function CompactRanking({ units, type, highlight }: { units: UnitScore[]; type: 'sales' | 'kitchen'; highlight: string }) {
   if (units.length === 0) return <div className="flex h-full items-center justify-center text-sm font-semibold text-white/35">Carregando indicadores…</div>
-  return <ol className="grid h-full content-center gap-2">
-    {units.map((unit, index) => <li key={unit.name} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-3 py-2 ${unit.name === highlight ? 'border-[#F4B942]/45 bg-[#F4B942]/10' : 'border-white/8 bg-white/[0.035]'}`}>
+  return <ol className="grid h-full min-h-0 gap-1.5" style={{ gridTemplateRows: `repeat(${units.length}, minmax(0, 1fr))` }}>
+    {units.map((unit, index) => <li key={unit.name} className={`grid min-h-0 grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-3 ${unit.name === highlight ? 'border-[#F4B942]/45 bg-[#F4B942]/10' : 'border-white/8 bg-white/[0.035]'}`}>
       <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${index === 0 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/10 text-white/60'}`}>{index + 1}</span>
-      <div className="min-w-0"><p className="truncate text-sm font-extrabold lg:text-base">{unit.name}</p>{unit.name === highlight ? <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-[#F4B942]">Esta unidade</p> : null}</div>
-      <strong className="font-display text-[clamp(1.3rem,2vw,2rem)] tabular-nums">{type === 'sales' ? unit.orders : typeof unit.kitchenMinutes === 'number' ? `${unit.kitchenMinutes.toLocaleString('pt-BR')} min` : '—'}</strong>
+      <p className="min-w-0 truncate text-sm font-extrabold lg:text-base">{unit.name}{unit.name === highlight ? <span className="ml-2 text-[9px] font-bold uppercase tracking-[0.1em] text-[#F4B942]">Esta unidade</span> : null}</p>
+      <strong className="font-display text-[clamp(1.15rem,1.7vw,1.7rem)] leading-none tabular-nums">{type === 'sales' ? unit.orders : typeof unit.kitchenMinutes === 'number' ? `${unit.kitchenMinutes.toLocaleString('pt-BR')} min` : '—'}</strong>
     </li>)}
   </ol>
 }
