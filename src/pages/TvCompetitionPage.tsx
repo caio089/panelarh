@@ -459,54 +459,56 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
       if (fetchedAt && fields.orders) setUpdatedAt(new Date(fetchedAt))
     }
 
-    const loadUnit = async (id: string, selected: CompetitionPeriod, withKitchen: boolean) => {
-      try {
-        const sales = await fetchCompetitionUnit({
-          unitId: id,
-          date: selected === 'dia' ? competitionDay : today,
-          period: selected,
-          signal: controller.signal,
-        })
-        if (sales.unit) publish(selected, sales.unit, { orders: true, kitchen: false }, sales.fetchedAt)
-      } catch (error) {
-        if (id === unitId) throw error
-        return
+    const loadSales = async (id: string, selected: CompetitionPeriod) => {
+      const sales = await fetchCompetitionUnit({
+        unitId: id,
+        date: selected === 'dia' ? competitionDay : today,
+        period: selected,
+        signal: controller.signal,
+      })
+      if (sales.unit) publish(selected, sales.unit, { orders: true, kitchen: false }, sales.fetchedAt)
+    }
+
+    const loadKitchen = async (id: string, selected: CompetitionPeriod) => {
+      const kitchen = await fetchCompetitionUnit({
+        unitId: id,
+        date: selected === 'dia' ? competitionDay : today,
+        period: selected,
+        kitchen: true,
+        signal: controller.signal,
+      })
+      if (kitchen.unit) publish(selected, kitchen.unit, { orders: false, kitchen: true })
+    }
+
+    const loadEach = async (selected: CompetitionPeriod, load: (id: string, period: CompetitionPeriod) => Promise<void>) => {
+      let primaryError = ''
+      for (const id of unitOrder) {
+        if (!alive || controller.signal.aborted) return primaryError
+        try {
+          await load(id, selected)
+        } catch (error) {
+          if (controller.signal.aborted) return primaryError
+          if (id === unitId && !primaryError) {
+            primaryError = error instanceof Error ? error.message : 'Não foi possível atualizar vendas e tempos.'
+          }
+        }
       }
-      if (!withKitchen || !alive || controller.signal.aborted) return
-      try {
-        const kitchen = await fetchCompetitionUnit({
-          unitId: id,
-          date: selected === 'dia' ? competitionDay : today,
-          period: selected,
-          kitchen: true,
-          signal: controller.signal,
-        })
-        if (kitchen.unit) publish(selected, kitchen.unit, { orders: false, kitchen: true })
-      } catch {
-        // Vendas desta unidade continuam na tela se o tempo da cozinha atrasar.
-      }
+      return primaryError
     }
 
     const run = async () => {
-      const withKitchen = Date.now() - lastKitchen > 3 * 60 * 1000
-      try {
-        await loadUnit(unitId, 'dia', withKitchen)
-        if (alive) setMetricsError('')
-      } catch (error) {
-        if (!alive || controller.signal.aborted) return
-        setMetricsError(error instanceof Error ? error.message : 'Não foi possível atualizar vendas e tempos.')
+      const salesError = await loadEach('dia', loadSales)
+      if (!alive || controller.signal.aborted) return
+      setMetricsError(salesError)
+      if (Date.now() - lastKitchen > 3 * 60 * 1000) {
+        await loadEach('dia', loadKitchen)
+        if (alive) lastKitchen = Date.now()
       }
-      for (const id of unitOrder) {
-        if (id === unitId || !alive || controller.signal.aborted) continue
-        await loadUnit(id, 'dia', withKitchen)
-      }
-      if (!alive) return
-      if (withKitchen) lastKitchen = Date.now()
+      if (!alive || controller.signal.aborted) return
       if (Date.now() - lastMonth > 10 * 60 * 1000) {
-        for (const id of unitOrder) {
-          if (!alive || controller.signal.aborted) return
-          await loadUnit(id, 'mes', true)
-        }
+        await loadEach('mes', loadSales)
+        if (!alive || controller.signal.aborted) return
+        await loadEach('mes', loadKitchen)
         if (alive) lastMonth = Date.now()
       }
       if (alive) timer = window.setTimeout(() => { void run() }, REFRESH_MS)
