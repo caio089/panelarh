@@ -184,7 +184,6 @@ export function PublicApplyPage() {
         source: extra.source,
         standing: extra.standing,
         restriction: extra.restriction.trim(),
-        reference: extra.reference.trim(),
         curriculoUrl,
         curriculoNome,
       })
@@ -430,13 +429,6 @@ export function PublicApplyPage() {
                   options={STANDING_OPTIONS}
                   onChange={(standing) => setExtra({ ...extra, standing })}
                 />
-                <Field label="Alguém que confirme seu último trabalho" hint="Nome e WhatsApp. Se for o primeiro emprego, deixe em branco.">
-                  <Input
-                    value={extra.reference}
-                    onChange={(event) => setExtra({ ...extra, reference: event.target.value })}
-                    placeholder="Ex.: Maria, (86) 90000-0000"
-                  />
-                </Field>
                 <Field label="Alguma restrição de horário?" hint="Opcional">
                   <Textarea
                     rows={2}

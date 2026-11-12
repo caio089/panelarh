@@ -10,7 +10,7 @@ export function phoneFromCandidatoInfo(info?: string | null, profilePhone?: stri
 export function rowsFromCandidatoInfo(info?: string | null): Array<[string, string]> {
   if (!info?.trim()) return []
   return info
-    .split(/\n|·/)
+    .split('\n')
     .map((part) => part.trim())
     .filter(Boolean)
     .map((part) => {

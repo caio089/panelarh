@@ -74,7 +74,6 @@ interface PublicApplicationInput {
   source: string
   standing: string
   restriction: string
-  reference: string
   curriculoUrl?: string | null
   curriculoNome?: string | null
 }
@@ -147,7 +146,6 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
     optionalLine('Como soube', input.source),
     optionalLine('Fica em pé', input.standing),
     optionalLine('Restrição de horário', input.restriction),
-    optionalLine('Referência', input.reference),
   ]
     .filter(Boolean)
     .join('\n')
@@ -391,7 +389,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
           cpf: input.cpf,
           experiencia: input.experience || null,
           info: buildPublicApplicationInfo(input),
-          referencia: input.reference.trim() || null,
           curriculoUrl: input.curriculoUrl || null,
           curriculoNome: input.curriculoNome || null,
         })

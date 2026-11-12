@@ -39,7 +39,7 @@ export interface ApplyDraft {
   job: { preferred_unit: string; weekend: string; commute: string; holidays: string }
   shifts: string[]
   experience: { worked: string; detail: string; daily: string; why: string; start: string; roles: string[] }
-  extra: { workCard: string; source: string; standing: string; restriction: string; reference: string }
+  extra: { workCard: string; source: string; standing: string; restriction: string }
 }
 
 const DRAFT_PREFIX = 'panela-apply-draft:'
@@ -69,7 +69,7 @@ export function emptyApplyDraft(): Omit<ApplyDraft, 'step'> {
     job: { preferred_unit: '', weekend: '', commute: '', holidays: '' },
     shifts: [],
     experience: { worked: '', detail: '', daily: '', why: '', start: '', roles: [] },
-    extra: { workCard: '', source: '', standing: '', restriction: '', reference: '' },
+    extra: { workCard: '', source: '', standing: '', restriction: '' },
   }
 }
 
@@ -113,7 +113,6 @@ export function loadApplyDraft(vagaId: string): ApplyDraft | null {
         source: text(parsed.extra?.source),
         standing: text(parsed.extra?.standing),
         restriction: text(parsed.extra?.restriction),
-        reference: text(parsed.extra?.reference),
       },
     }
   } catch {

@@ -219,13 +219,6 @@ export function AdminVagaPage() {
               ) : null}
             </section>
 
-            {selected.experiencia && selected.profile?.relevant_experience ? (
-              <section>
-                <h3 className="mb-2 font-bold text-[var(--pv-navy)]">Experiência</h3>
-                <div className="rounded-xl border border-[#E7E2D3] bg-white p-3">{selected.experiencia}</div>
-              </section>
-            ) : null}
-
             <Button
               variant="danger"
               className="w-full"
