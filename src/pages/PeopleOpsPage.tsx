@@ -11,7 +11,6 @@ import {
   GraduationCap,
   HeartHandshake,
   HeartPulse,
-  ShieldCheck,
 } from 'lucide-react'
 import { PageHeader } from '@/components/ui'
 import { cn } from '@/lib/utils'
@@ -166,39 +165,14 @@ function RhArea() {
 
 function DpArea() {
   return (
-    <div className="mt-6 space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ModuleCard
-          icon={<HeartPulse size={20} />}
-          label="Saúde ocupacional"
-          title="Atestados e afastamentos"
-          description="Controle datas, período de afastamento, status e retorno ao trabalho por colaborador."
-        links={[{ to: '/admin/colaboradores', label: 'Abrir o time' }]}
-      />
+    <div className="mt-6">
       <ModuleCard
-        icon={<FileClock size={20} />}
-        label="Histórico funcional"
-        title="SID e ocorrências"
-        description="Registre o SID e mantenha o histórico funcional consultável pela responsável do RH."
-        links={[{ to: '/admin/colaboradores', label: 'Registrar no histórico' }]}
+        icon={<ClipboardCheck size={20} />}
+        label="Departamento pessoal"
+        title="Falta, atestado, advertência e documento"
+        description="Abra a pessoa e registre falta, atestado, advertência ou documento na ficha."
+        links={[{ to: '/admin/colaboradores', label: 'Abrir colaboradores' }]}
       />
-      <ModuleCard
-        icon={<FileText size={20} />}
-        label="Documentos"
-        title="Holerites e exames"
-        description="Central para holerites, exame admissional, periódicos, ASO, contratos e demais documentos."
-        links={[{ to: '/admin/colaboradores', label: 'Registrar documento' }]}
-      />
-      </div>
-
-      <aside className="rounded-2xl border border-[#E6C9BE] bg-[#FFF8F4] p-4 text-sm text-[#704333]">
-        <div className="flex items-start gap-3">
-          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[var(--pv-terracotta)]" />
-          <p>
-            <strong>Dados sensíveis:</strong> CID, laudos, atestados e exames precisam ficar em banco seguro, com acesso individual da responsável pelo RH e registro de quem consultou. Esta área já organiza o fluxo; o cadastro desses arquivos não deve ser feito no navegador.
-          </p>
-        </div>
-      </aside>
     </div>
   )
 }
