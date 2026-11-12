@@ -85,7 +85,7 @@ const RH_GROUPS: NavGroup[] = [
 
 export function AdminShell() {
   const { loading, isStaff, isAdmin, isRh, signOut } = useAuth()
-  const { store } = useData()
+  const { store, candidatosError } = useData()
   const { pathname } = useLocation()
 
   if (loading) return <LoadingScreen text="Abrindo painel…" />
@@ -153,6 +153,11 @@ export function AdminShell() {
       </aside>
 
       <div className="min-w-0">
+        {candidatosError ? (
+          <p className="border-b border-[#E15B3F]/40 bg-[#3A1420] px-5 py-3 text-sm text-[#F7F4EC]">
+            {candidatosError}
+          </p>
+        ) : null}
         <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-3 lg:hidden">
           <p className="truncate text-xs font-semibold text-[var(--pv-cream)]/70">{who.title}</p>
           <div className="flex gap-2">

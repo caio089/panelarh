@@ -10,6 +10,13 @@ import {
 } from 'react'
 import type { CandidateStatus, Candidato, Unit, Vaga } from '@/types'
 import type { AppStore } from '@/lib/data'
+import {
+  candidatoKey,
+  deleteRemoteCandidato,
+  insertCandidato,
+  listCandidatos,
+  updateRemoteCandidato,
+} from '@/lib/candidatosDb'
 import { loadDemoStore, newId, resetDemoStore, saveDemoStore } from '@/lib/demo/storage'
 import { deleteRemoteVaga, insertVaga, listVagas, updateRemoteVaga } from '@/lib/vagasDb'
 
@@ -64,6 +71,7 @@ interface PublicApplicationInput {
 interface DataContextValue {
   store: AppStore
   vagasError: string
+  candidatosError: string
   resetDemoData: () => void
   addVaga: (input: NewVagaInput) => Promise<string>
   updateVaga: (vagaId: string, patch: Partial<Pick<Vaga, VagaEditableField>>) => Promise<void>
@@ -121,45 +129,89 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
 export function DataProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<AppStore>(() => loadDemoStore())
   const [vagasError, setVagasError] = useState('')
+  const [candidatosError, setCandidatosError] = useState('')
   const vagaWrite = useRef(0)
+  const candidatoWrite = useRef(0)
 
   useEffect(() => {
     saveDemoStore(store)
   }, [store])
 
-  const pullVagas = useCallback(async () => {
-    const seen = vagaWrite.current
+  const pullShared = useCallback(async () => {
+    const seenVagas = vagaWrite.current
+    const seenCandidatos = candidatoWrite.current
     try {
-      const vagas = await listVagas()
-      if (seen !== vagaWrite.current) return
+      const [vagas, listed] = await Promise.all([listVagas(), listCandidatos()])
+      if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
+
+      const vagaIds = new Set(vagas.map((vaga) => vaga.id))
+      const known = new Set(listed.map((candidato) => candidato.id))
+      const knownKeys = new Set(listed.map((candidato) => candidatoKey(candidato)))
+      const pending = loadDemoStore().candidatos.filter(
+        (candidato) =>
+          vagaIds.has(candidato.vaga_id) &&
+          !known.has(candidato.id) &&
+          !knownKeys.has(candidatoKey(candidato)),
+      )
+
+      const keptLocal = []
+      if (pending.length > 0) {
+        for (const candidato of pending) {
+          try {
+            const saved = await insertCandidato({
+              vagaId: candidato.vaga_id,
+              nome: candidato.nome,
+              experiencia: candidato.experiencia,
+              info: candidato.info_complementar,
+              criadoEm: candidato.criado_em,
+            })
+            const status: CandidateStatus = candidato.status === 'reprovada' ? 'banco' : candidato.status
+            if (status !== 'pendente') {
+              await updateRemoteCandidato(saved.id, {
+                status,
+                data_inicio_treinamento: candidato.data_inicio_treinamento,
+              })
+              saved.status = status
+              saved.data_inicio_treinamento = status === 'aprovada' ? candidato.data_inicio_treinamento : null
+            }
+            listed.push(saved)
+          } catch {
+            keptLocal.push(candidato)
+          }
+        }
+        if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
+      }
+      const candidatos = [...listed, ...keptLocal].sort((a, b) => +new Date(b.criado_em) - +new Date(a.criado_em))
+
       setVagasError('')
-      setStore((prev) => ({ ...prev, vagas }))
+      setCandidatosError('')
+      setStore((prev) => ({ ...prev, vagas, candidatos }))
     } catch (err) {
-      if (seen !== vagaWrite.current) return
-      setVagasError(err instanceof Error ? err.message : 'Não foi possível carregar as vagas.')
+      if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
+      const message = err instanceof Error ? err.message : 'Não foi possível carregar o painel.'
+      if (message.includes('candidat')) setCandidatosError(message)
+      else setVagasError(message)
     }
   }, [])
 
   useEffect(() => {
-    void pullVagas()
+    void pullShared()
     const onFocus = () => {
-      void pullVagas()
+      void pullShared()
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [pullVagas])
+  }, [pullShared])
 
-  // Mantém abas abertas sincronizadas (ex.: site público em uma aba, painel RH em outra).
+  // Outra aba no mesmo navegador pede a lista do banco de novo.
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (!event.key?.startsWith('panela-demo-store')) return
-      const next = loadDemoStore()
-      setStore((prev) => ({ ...next, vagas: prev.vagas }))
-      void pullVagas()
+      void pullShared()
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [pullVagas])
+  }, [pullShared])
 
   const resetDemoData = useCallback(() => {
     setStore(resetDemoStore())
@@ -202,8 +254,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const deleteVaga = useCallback(async (vagaId: string) => {
     vagaWrite.current += 1
+    candidatoWrite.current += 1
     await deleteRemoteVaga(vagaId)
     vagaWrite.current += 1
+    candidatoWrite.current += 1
     setStore((prev) => {
       const removedCandidatoIds = new Set(prev.candidatos.filter((c) => c.vaga_id === vagaId).map((c) => c.id))
       return {
@@ -218,18 +272,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateCandidatoStatus = useCallback(
     (candidatoId: string, status: CandidateStatus, dataInicio?: string | null) => {
       const nextStatus: CandidateStatus = status === 'reprovada' ? 'banco' : status
+      const trainingDate = nextStatus === 'aprovada' ? dataInicio || null : null
+      candidatoWrite.current += 1
       setStore((prev) => ({
         ...prev,
         candidatos: prev.candidatos.map((c) =>
           c.id === candidatoId
-            ? {
-                ...c,
-                status: nextStatus,
-                data_inicio_treinamento: nextStatus === 'aprovada' ? dataInicio || null : null,
-              }
+            ? { ...c, status: nextStatus, data_inicio_treinamento: trainingDate }
             : c,
         ),
       }))
+      void updateRemoteCandidato(candidatoId, {
+        status: nextStatus,
+        data_inicio_treinamento: trainingDate,
+      }).catch((err: unknown) => {
+        setCandidatosError(err instanceof Error ? err.message : 'Não foi possível atualizar o candidato.')
+      })
     },
     [],
   )
@@ -270,19 +328,42 @@ export function DataProvider({ children }: { children: ReactNode }) {
     })
     if ('chosenName' in result) {
       vagaWrite.current += 1
+      candidatoWrite.current += 1
       void updateRemoteVaga(vagaId, { ativa: false }).catch(() => {
         setVagasError('A vaga foi encerrada neste navegador, mas o site ainda não confirmou.')
       })
+      const chosen = store.candidatos.find((item) => item.id === candidatoId)
+      const parked = store.candidatos.filter(
+        (item) =>
+          item.vaga_id === vagaId &&
+          item.id !== candidatoId &&
+          (item.status === 'pendente' || item.status === 'entrevista'),
+      )
+      void Promise.all([
+        updateRemoteCandidato(candidatoId, {
+          status: 'aprovada',
+          data_inicio_treinamento: chosen?.data_inicio_treinamento ?? null,
+        }),
+        ...parked.map((item) =>
+          updateRemoteCandidato(item.id, { status: 'banco', data_inicio_treinamento: null }),
+        ),
+      ]).catch(() => {
+        setCandidatosError('A seleção mudou neste navegador, mas o outro painel ainda não confirmou.')
+      })
     }
     return result
-  }, [])
+  }, [store.candidatos])
 
   const deleteCandidato = useCallback((candidatoId: string) => {
+    candidatoWrite.current += 1
     setStore((prev) => ({
       ...prev,
       candidatos: prev.candidatos.filter((c) => c.id !== candidatoId),
       messages: prev.messages.filter((m) => m.candidato_id !== candidatoId),
     }))
+    void deleteRemoteCandidato(candidatoId).catch((err: unknown) => {
+      setCandidatosError(err instanceof Error ? err.message : 'Não foi possível excluir o candidato.')
+    })
   }, [])
 
   const submitPublicApplication = useCallback(
@@ -290,24 +371,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!store.vagas.some((v) => v.id === input.vagaId && v.ativa !== false)) {
         return { error: 'Esta vaga não está mais disponível.' }
       }
-      if (!input.nome.trim()) return { error: 'Informe seu nome.' }
+      if (input.nome.trim().length < 2) return { error: 'Informe seu nome.' }
 
-      const candidato: Candidato = {
-        id: newId('cand'),
-        vaga_id: input.vagaId,
-        profile_id: null,
-        nome: input.nome.trim(),
-        experiencia: input.experience || null,
-        info_complementar: buildPublicApplicationInfo(input),
-        referencia: null,
-        status: 'pendente',
-        data_inicio_treinamento: null,
-        curriculo_url: null,
-        curriculo_nome: null,
-        criado_em: new Date().toISOString(),
+      candidatoWrite.current += 1
+      try {
+        const candidato = await insertCandidato({
+          vagaId: input.vagaId,
+          nome: input.nome,
+          experiencia: input.experience || null,
+          info: buildPublicApplicationInfo(input),
+        })
+        candidatoWrite.current += 1
+        setCandidatosError('')
+        setStore((prev) => ({
+          ...prev,
+          candidatos: [candidato, ...prev.candidatos.filter((item) => item.id !== candidato.id)],
+        }))
+        return { candidatoId: candidato.id }
+      } catch (err) {
+        candidatoWrite.current += 1
+        const message = err instanceof Error ? err.message : 'Não foi possível registrar a candidatura.'
+        return { error: message }
       }
-      setStore((prev) => ({ ...prev, candidatos: [candidato, ...prev.candidatos] }))
-      return { candidatoId: candidato.id }
     },
     [store.vagas],
   )
@@ -393,6 +478,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     () => ({
       store,
       vagasError,
+      candidatosError,
       resetDemoData,
       addVaga,
       updateVaga,
@@ -411,6 +497,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [
       store,
       vagasError,
+      candidatosError,
       resetDemoData,
       addVaga,
       updateVaga,
