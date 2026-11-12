@@ -13,7 +13,7 @@
       "maxDuration": 300
     },
     "api/selecao.js": {
-      "maxDuration": 60
+      "maxDuration": 180
     }
   },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]

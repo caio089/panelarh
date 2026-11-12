@@ -8,6 +8,7 @@ import { formatDateBR } from '@/lib/utils'
 import { STATUS_META, type Candidato, type Experience, type Profile, type Vaga } from '@/types'
 import { Button, Modal, NoticeModal, StatusPill } from '@/components/ui'
 import { ProfileAnswers } from '@/components/ProfileAnswers'
+import { resumeReadLabel } from '@/lib/grokSelection'
 
 export type CandidateDetailData = {
   candidato: Candidato
@@ -17,6 +18,8 @@ export type CandidateDetailData = {
   unitName?: string
   score?: number
   reasons?: string[]
+  leuCurriculo?: boolean
+  curriculoFonte?: string
 }
 
 export function CandidateDetailModal({
@@ -36,7 +39,7 @@ export function CandidateDetailModal({
 
   if (!data) return null
 
-  const { candidato, profile, experiences = [], vaga, unitName, score, reasons } = data
+  const { candidato, profile, experiences = [], vaga, unitName, score, reasons, curriculoFonte } = data
   const message =
     waMsg ||
     whatsAppMessageForStatus({
@@ -61,6 +64,11 @@ export function CandidateDetailModal({
         {typeof score === 'number' ? (
           <span className="rounded-md bg-[#F8E8E3] px-2.5 py-1 text-[11px] font-bold text-[var(--pv-terracotta)]">
             Match {score}%
+          </span>
+        ) : null}
+        {curriculoFonte ? (
+          <span className="rounded-md bg-[#F1EDE0] px-2.5 py-1 text-[11px] font-bold text-[#4A4636]">
+            {resumeReadLabel(curriculoFonte)}
           </span>
         ) : null}
       </div>

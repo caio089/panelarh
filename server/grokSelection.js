@@ -1,3 +1,5 @@
+import { attachResumes, resumeReadLabel } from './resumeForSelection.js'
+
 const MODEL = 'openai/gpt-oss-120b'
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions'
 const SENSITIVE_LINE = /^(cpf|whatsapp|telefone|phone|banco|conta|ag[eê]ncia)\s*:/i
@@ -57,11 +59,14 @@ function peopleBrief(candidatos) {
       nome,
       experiencia: clip(person?.experiencia, 800),
       respostas: answersForModel(person?.respostas),
+      curriculoUrl: String(person?.curriculoUrl || person?.curriculo_url || '').slice(0, 500),
     }
   })
 }
 
-function parseRanking(text, allowedIds) {
+function parseRanking(text, people) {
+  const allowedIds = new Set(people.map((person) => person.id))
+  const byId = new Map(people.map((person) => [person.id, person]))
   const raw = String(text || '')
     .replace(/^```json\s*/i, '')
     .replace(/```$/i, '')
@@ -86,21 +91,47 @@ function parseRanking(text, allowedIds) {
           .map((reason) => reason.trim().slice(0, 180))
           .slice(0, 4)
       : []
+    const person = byId.get(id)
+    const reasonsWithResume = reasons.length ? reasons : ['A Groq não detalhou este cruzamento.']
     ranking.push({
       id,
       score,
-      reasons: reasons.length ? reasons : ['A Groq não detalhou este cruzamento.'],
+      reasons: reasonsWithResume,
+      leuCurriculo: Boolean(person?.curriculoLido),
+      curriculoFonte: person?.curriculoFonte || 'sem_arquivo',
     })
   }
   for (const id of allowedIds) {
     if (seen.has(id)) continue
-    ranking.push({ id, score: 0, reasons: ['A Groq não devolveu uma nota para esta pessoa.'] })
+    const person = byId.get(id)
+    ranking.push({
+      id,
+      score: 0,
+      reasons: ['A Groq não devolveu uma nota para esta pessoa.'],
+      leuCurriculo: Boolean(person?.curriculoLido),
+      curriculoFonte: person?.curriculoFonte || 'sem_arquivo',
+    })
   }
   ranking.sort((a, b) => b.score - a.score)
-  return {
-    summary: clip(parsed.summary, 700) || 'A Groq cruzou as candidaturas com o que a vaga pede.',
-    ranking,
-  }
+  const lidos = people.filter((person) => person.curriculoLido).length
+  const summaryBase = clip(parsed.summary, 700) || 'A Groq cruzou as candidaturas com o que a vaga pede.'
+  const summary =
+    people.length === 0
+      ? summaryBase
+      : `${summaryBase} Currículos lidos: ${lidos} de ${people.length}.`
+  return { summary, ranking }
+}
+
+function peopleForModel(people) {
+  return people.map((person) => ({
+    id: person.id,
+    nome: person.nome,
+    experiencia: person.experiencia,
+    respostas: person.respostas,
+    curriculo: person.curriculo || '',
+    curriculoLido: Boolean(person.curriculoLido),
+    curriculoSituacao: resumeReadLabel(person.curriculoFonte),
+  }))
 }
 
 export async function rankWithGrok(body, apiKey) {
@@ -109,7 +140,7 @@ export async function rankWithGrok(body, apiKey) {
     throw new SelectionError('A Groq ainda não está ligada neste ambiente. Falta a chave.', 503)
   }
   const vaga = jobBrief(body?.vaga)
-  const pessoas = peopleBrief(body?.candidatos)
+  const pessoas = await attachResumes(peopleBrief(body?.candidatos), key)
   const count = Math.max(1, Math.min(pessoas.length, Number(body?.count) || 3))
 
   const controller = new AbortController()
@@ -131,14 +162,14 @@ export async function rankWithGrok(body, apiKey) {
           {
             role: 'system',
             content:
-              'Você faz a seleção da Panela Velha, restaurante em Teresina, usando a Groq. Cruze só o que a vaga pede com o que cada pessoa respondeu. Não invente experiência. Não peça nem cite CPF, telefone ou dado bancário. Responda em português, apenas com JSON: {"summary":"texto curto","ranking":[{"id":"id recebido","score":0,"reasons":["motivo concreto"]}]}. score de 0 a 100. Inclua todas as pessoas recebidas.',
+              'Você faz a seleção da Panela Velha, restaurante em Teresina, usando a Groq. Cruze o que a vaga pede com a ficha E com o currículo lido. Se curriculoLido for true, use o campo curriculo; isso pesa mais do que um texto vago da ficha. Não invente emprego que não está na ficha nem no currículo. Se não leu currículo, deixe isso claro nos motivos. Não cite CPF, telefone ou dado bancário. Responda em português, apenas com JSON: {"summary":"texto curto","ranking":[{"id":"id recebido","score":0,"reasons":["motivo concreto"]}]}. score de 0 a 100. Inclua todas as pessoas recebidas.',
           },
           {
             role: 'user',
             content: JSON.stringify({
               vaga,
               quantasAvancam: count,
-              pessoas,
+              pessoas: peopleForModel(pessoas),
             }),
           },
         ],
@@ -159,5 +190,5 @@ export async function rankWithGrok(body, apiKey) {
   const payload = await response.json()
   const message = payload?.choices?.[0]?.message
   const text = message?.content || message?.reasoning || ''
-  return parseRanking(text, new Set(pessoas.map((person) => person.id)))
+  return parseRanking(text, pessoas)
 }

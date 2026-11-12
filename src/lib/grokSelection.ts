@@ -5,6 +5,8 @@ export type GrokRank = {
   id: string
   score: number
   reasons: string[]
+  leuCurriculo?: boolean
+  curriculoFonte?: string
 }
 
 export type GrokSelection = {
@@ -13,6 +15,15 @@ export type GrokSelection = {
 }
 
 const SENSITIVE = /^(cpf|whatsapp|telefone|phone|banco|conta|ag[eê]ncia)$/i
+
+export function resumeReadLabel(fonte?: string) {
+  if (fonte === 'foto') return 'Leu a foto do currículo'
+  if (fonte === 'pdf') return 'Leu o texto do PDF'
+  if (fonte === 'pdf_sem_texto') return 'PDF antigo sem texto para ler'
+  if (fonte === 'foto_ilegivel') return 'A foto do currículo não deu para ler'
+  if (fonte === 'sem_arquivo') return 'Sem currículo anexado'
+  return 'Currículo não lido'
+}
 
 /** O que o Grok pode ler: experiência e respostas da vaga, sem documento nem telefone. */
 export function answersForGrok(info?: string | null) {
@@ -49,6 +60,7 @@ export async function requestGrokSelection(input: {
         nome: candidato.nome,
         experiencia: candidato.experiencia,
         respostas: answersForGrok(candidato.info_complementar),
+        curriculoUrl: candidato.curriculo_url || null,
       })),
     }),
   })

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Brain, MessageCircle, Sparkles, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
-import { requestGrokSelection } from '@/lib/grokSelection'
+import { requestGrokSelection, resumeReadLabel } from '@/lib/grokSelection'
 import { DEFAULT_WHATSAPP_MSG, openWhatsAppChat, whatsAppMessageForStatus } from '@/lib/whatsapp'
 import { phoneFromCandidatoInfo } from '@/lib/candidatoInfo'
 import { Button, Field, Input, NoticeModal, PageHeader, Select, StatusPill, Textarea } from '@/components/ui'
@@ -15,6 +15,8 @@ type Ranked = {
   vaga: Vaga
   score: number
   reasons: string[]
+  leuCurriculo?: boolean
+  curriculoFonte?: string
 }
 
 export function AdminSelectionPage() {
@@ -56,7 +58,15 @@ export function AdminSelectionPage() {
       .filter((c) => c.vaga_id === vaga.id && c.status !== 'reprovada' && c.status !== 'banco')
       .map((c) => {
         const p = store.profiles.find((x) => x.id === c.profile_id) || null
-        return { candidato: c, profile: p, vaga, score: 0, reasons: [] }
+        return {
+          candidato: c,
+          profile: p,
+          vaga,
+          score: 0,
+          reasons: [] as string[],
+          leuCurriculo: false,
+          curriculoFonte: undefined,
+        } satisfies Ranked
       })
       .sort((a, b) => b.score - a.score)
   }, [store, vaga])
@@ -103,7 +113,15 @@ export function AdminSelectionPage() {
       const ranked = source
         .map((item) => {
           const grok = byId.get(item.candidato.id)
-          return grok ? { ...item, score: grok.score, reasons: grok.reasons } : item
+          return grok
+            ? {
+                ...item,
+                score: grok.score,
+                reasons: grok.reasons,
+                leuCurriculo: grok.leuCurriculo,
+                curriculoFonte: grok.curriculoFonte,
+              }
+            : item
         })
         .sort((a, b) => b.score - a.score)
       const next = ranked.slice(0, take)
@@ -171,6 +189,8 @@ export function AdminSelectionPage() {
       unitName: unit?.name,
       score: item.score,
       reasons: item.reasons,
+      leuCurriculo: item.leuCurriculo,
+      curriculoFonte: item.curriculoFonte,
     })
   }
 
@@ -186,7 +206,7 @@ export function AdminSelectionPage() {
       <PageHeader
         eyebrow="Panela AI"
         title="Seleção inteligente"
-        description="O Groq cruza o que a vaga pede com a experiência e as respostas de cada pessoa. Ao confirmar a escolha, a vaga fecha e os demais vão para o banco de talentos."
+        description="A Groq lê a foto do currículo (e o texto de PDF antigo, se houver) e cruza com a ficha e com o que a vaga pede. Ao confirmar a escolha, a vaga fecha e os demais vão para o banco de talentos."
       />
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-br from-[#1B2A57] to-[#121D40] p-5 sm:p-6">
@@ -250,7 +270,7 @@ export function AdminSelectionPage() {
           >
             <Sparkles size={15} />
             {analyzing
-              ? 'Groq cruzando com a vaga…'
+              ? 'Groq lendo currículos…'
               : `Pedir ao Groq ${requestedCount}`}
           </Button>
           {displayed.length > 1 && cut ? (
@@ -330,7 +350,10 @@ export function AdminSelectionPage() {
           <div className="pv-stamp-spin flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-[var(--pv-cream)]">
             <Brain size={22} />
           </div>
-          <p className="font-display text-lg">O Groq está cruzando cada candidatura com a vaga…</p>
+          <p className="font-display text-lg">A Groq está lendo os currículos e cruzando com a vaga…</p>
+          <p className="max-w-md text-center text-sm text-[#EFE3C4]/70">
+            Foto do currículo entra na nota. PDF antigo só entra se tiver texto; PDF de foto escaneada quase nunca tem.
+          </p>
         </div>
       ) : null}
 
@@ -451,7 +474,7 @@ export function AdminSelectionPage() {
             </article>
           ) : vagaId && !cut ? (
             <p className="mb-4 text-sm text-[#EFE3C4]">
-              Informe quantas pessoas você quer e peça ao Groq. Ele explica o cruzamento com a vaga.
+              Informe quantas pessoas você quer e peça à Groq. Ela lê o currículo e explica o cruzamento com a vaga.
             </p>
           ) : null}
 
@@ -487,12 +510,23 @@ export function AdminSelectionPage() {
                           {cut ? `${item.score}%` : 'Sem nota'}
                         </span>
                       </div>
-                      <div className="mt-1">
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
                         <StatusPill
                           label={STATUS_META[item.candidato.status].label}
                           color={STATUS_META[item.candidato.status].color}
                           bg={STATUS_META[item.candidato.status].bg}
                         />
+                        {cut ? (
+                          <span
+                            className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                              item.leuCurriculo
+                                ? 'bg-[#E4F3E9] text-[#2F7D4F]'
+                                : 'bg-[#F1EDE0] text-[#6B6758]'
+                            }`}
+                          >
+                            {resumeReadLabel(item.curriculoFonte)}
+                          </span>
+                        ) : null}
                       </div>
                       <ul className="mt-3 space-y-1 text-xs text-[var(--pv-muted)]">
                         {(cut ? item.reasons : ['O Groq ainda não cruzou esta candidatura com a vaga.']).map((r) => (
