@@ -6,7 +6,7 @@ import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/featur
 
 type UnitScore = {
   name: string
-  orders: number
+  orders: number | null
   kitchenMinutes: number | null
   accent: string
 }
@@ -112,7 +112,7 @@ function mergeCompetitionUnit(current: UnitScore[], unit: CompetitionUnitMetric,
   const existing = byName.get(unit.name)
   byName.set(unit.name, {
     name: unit.name,
-    orders: fields.orders ? unit.orders ?? existing?.orders ?? 0 : existing?.orders ?? 0,
+    orders: fields.orders ? unit.orders ?? existing?.orders ?? 0 : existing?.orders ?? null,
     kitchenMinutes: fields.kitchen ? unit.kitchenMinutes ?? null : existing?.kitchenMinutes ?? null,
     accent: ACCENTS[unit.name] ?? '#EFE3C4',
   })
@@ -220,7 +220,10 @@ function CompetitionDashboard() {
         date,
         period: selected,
         signal: controller.signal,
-        onUnit: (unit, fetchedAt) => publish(selected, unit, { orders: true, kitchen: selected === 'mes' }, fetchedAt),
+        onUnit: (unit, fetchedAt) => publish(selected, unit, {
+          orders: typeof unit.orders === 'number',
+          kitchen: selected === 'mes' && typeof unit.kitchenMinutes === 'number',
+        }, fetchedAt),
       })
       if (!alive || controller.signal.aborted) return sales
       if (sales.loaded.length > 0 && !sales.pending) filled.add(selected)
@@ -245,12 +248,17 @@ function CompetitionDashboard() {
         if (!alive || controller.signal.aborted) return false
         try {
           const payload = await fetchCompetitionUnit({ unitId, date, period: 'mes', daily: true, signal: controller.signal })
+          if (payload.unit && typeof payload.unit.kitchenMinutes === 'number') {
+            publish('mes', payload.unit, {
+              orders: typeof payload.unit.orders === 'number',
+              kitchen: true,
+            }, payload.fetchedAt)
+          }
           if (payload.partial || !payload.unit || !payload.days) {
             pending = true
             continue
           }
           series.push({ name: payload.unit.name, days: payload.days })
-          publish('mes', payload.unit, { orders: true, kitchen: true }, payload.fetchedAt)
         } catch {
           // Uma unidade sem série não impede o ranking das outras.
         }
@@ -324,12 +332,12 @@ function CompetitionDashboard() {
     }, { replace: true })
   }
 
-  const salesRanking = [...units].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
+  const salesRanking = [...units].sort((a, b) => (b.orders ?? -1) - (a.orders ?? -1) || a.name.localeCompare(b.name))
   const kitchenRanking = [...units].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
   const currentScores = salesRanking.map((unit) => {
     const salesIndex = salesRanking.findIndex((item) => item.name === unit.name)
     const kitchenIndex = kitchenRanking.findIndex((item) => item.name === unit.name)
-    const salesPosition = rankingPosition(salesRanking, salesIndex, (item) => item.orders)
+    const salesPosition = rankingPosition(salesRanking, salesIndex, (item) => item.orders ?? -1)
     const kitchenPosition = typeof unit.kitchenMinutes === 'number'
       ? rankingPosition(kitchenRanking, kitchenIndex, (item) => -(item.kitchenMinutes ?? Infinity))
       : 0
@@ -520,23 +528,27 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
       const salesError = await loadEach('dia', loadSales)
       if (!alive || controller.signal.aborted) return
       setMetricsError(salesError)
-      if (Date.now() - lastKitchen > 3 * 60 * 1000) {
-        await loadEach('dia', loadKitchen)
-        if (alive) lastKitchen = Date.now()
-      }
-      if (!alive || controller.signal.aborted) return
+      let monthPending = false
       if (Date.now() - lastMonth > 10 * 60 * 1000) {
         const month = await loadCompetitionUnits({
           unitIds: unitOrder,
           date: today,
           period: 'mes',
           signal: controller.signal,
-          onUnit: (unit, fetchedAt) => publish('mes', unit, { orders: true, kitchen: true }, fetchedAt),
+          onUnit: (unit, fetchedAt) => publish('mes', unit, {
+            orders: typeof unit.orders === 'number',
+            kitchen: typeof unit.kitchenMinutes === 'number',
+          }, fetchedAt),
         })
         if (!alive || controller.signal.aborted) return
-        if (!month.pending && month.loaded.length === unitOrder.length) lastMonth = Date.now()
+        monthPending = month.pending || month.loaded.length !== unitOrder.length
+        if (!monthPending) lastMonth = Date.now()
       }
-      if (alive) timer = window.setTimeout(() => { void run() }, REFRESH_MS)
+      if (Date.now() - lastKitchen > 3 * 60 * 1000) {
+        await loadEach('dia', loadKitchen)
+        if (alive) lastKitchen = Date.now()
+      }
+      if (alive) timer = window.setTimeout(() => { void run() }, monthPending ? 8000 : REFRESH_MS)
     }
 
     void run()
@@ -549,7 +561,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
 
   const urgentOrders = data?.queue.filter((order) => order.urgent) ?? []
   const activeOrders = data?.queue ?? []
-  const salesRanking = [...metrics[period]].sort((a, b) => b.orders - a.orders || a.name.localeCompare(b.name))
+  const salesRanking = [...metrics[period]].sort((a, b) => (b.orders ?? -1) - (a.orders ?? -1) || a.name.localeCompare(b.name))
   const kitchenRanking = [...metrics[period]].sort((a, b) => (a.kitchenMinutes ?? Infinity) - (b.kitchenMinutes ?? Infinity) || a.name.localeCompare(b.name))
   const periodLabel = period === 'dia' ? 'Hoje' : 'Este mês'
 
@@ -619,7 +631,7 @@ function CompactRanking({ units, type, highlight }: { units: UnitScore[]; type: 
     {units.map((unit, index) => <li key={unit.name} className={`grid min-h-0 grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-3 ${unit.name === highlight ? 'border-[#F4B942]/45 bg-[#F4B942]/10' : 'border-white/8 bg-white/[0.035]'}`}>
       <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${index === 0 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/10 text-white/60'}`}>{index + 1}</span>
       <p className="min-w-0 truncate text-sm font-extrabold lg:text-base">{unit.name}{unit.name === highlight ? <span className="ml-2 text-[9px] font-bold uppercase tracking-[0.1em] text-[#F4B942]">Esta unidade</span> : null}</p>
-      <strong className="font-display text-[clamp(1.15rem,1.7vw,1.7rem)] leading-none tabular-nums">{type === 'sales' ? unit.orders : typeof unit.kitchenMinutes === 'number' ? `${unit.kitchenMinutes.toLocaleString('pt-BR')} min` : '—'}</strong>
+      <strong className="font-display text-[clamp(1.15rem,1.7vw,1.7rem)] leading-none tabular-nums">{type === 'sales' ? (typeof unit.orders === 'number' ? unit.orders : '—') : typeof unit.kitchenMinutes === 'number' ? `${unit.kitchenMinutes.toLocaleString('pt-BR')} min` : '—'}</strong>
     </li>)}
   </ol>
 }
@@ -671,7 +683,7 @@ function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodL
 }
 
 function RankingCard({ title, subtitle, icon, units, type = 'sales', showPoints = true, prominent = false }: { title: string; subtitle: string; icon: ReactNode; units: UnitScore[]; type?: 'sales' | 'kitchen'; showPoints?: boolean; prominent?: boolean }) {
-  const maxOrders = Math.max(1, ...units.map((unit) => unit.orders))
+  const maxOrders = Math.max(1, ...units.map((unit) => unit.orders ?? 0))
   const fastestKitchen = units.find((unit) => typeof unit.kitchenMinutes === 'number')?.kitchenMinutes ?? 0
   return (
     <article className={`rounded-[28px] border border-white/10 bg-[#0D1731]/80 shadow-xl backdrop-blur ${prominent ? 'p-5 sm:p-7' : 'p-4 sm:p-5'}`}>
@@ -681,16 +693,16 @@ function RankingCard({ title, subtitle, icon, units, type = 'sales', showPoints 
       </div>
       <ol className="mt-2 divide-y divide-white/8">
         {units.map((unit, index) => {
-          const value = type === 'sales' ? `${unit.orders} vendas` : typeof unit.kitchenMinutes !== 'number' ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
-          const width = type === 'sales' ? (unit.orders / maxOrders) * 100 : unit.kitchenMinutes ? (fastestKitchen / unit.kitchenMinutes) * 100 : 0
+          const value = type === 'sales' ? (typeof unit.orders === 'number' ? `${unit.orders} vendas` : '—') : typeof unit.kitchenMinutes !== 'number' ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`
+          const width = type === 'sales' ? ((unit.orders ?? 0) / maxOrders) * 100 : unit.kitchenMinutes ? (fastestKitchen / unit.kitchenMinutes) * 100 : 0
           const position = type === 'sales'
-            ? rankingPosition(units, index, (item) => item.orders)
+            ? rankingPosition(units, index, (item) => item.orders ?? -1)
             : rankingPosition(units, index, (item) => -(item.kitchenMinutes ?? Infinity))
           const points = typeof unit.kitchenMinutes === 'number' || type === 'sales' ? pointsForPosition(position) : 0
           const hasPosition = type === 'sales' || typeof unit.kitchenMinutes === 'number'
           return <li key={unit.name} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-3 ${prominent ? 'py-5' : 'py-3'}`}>
             <span className={`flex items-center justify-center rounded-full font-extrabold ${prominent ? 'h-10 w-10 text-lg' : 'h-7 w-7 text-sm'} ${hasPosition && position === 1 ? 'bg-[#F4B942] text-[#18142A]' : 'bg-white/8 text-white/65'}`}>{hasPosition ? position : '—'}</span>
-            <div className="min-w-0"><div className="flex justify-between gap-2"><p className={`truncate font-bold ${prominent ? 'text-lg sm:text-xl' : 'text-sm sm:text-base'}`}>{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? `${unit.orders} vendas` : 'preparo'}</span></div><div className={`mt-2 overflow-hidden rounded-full bg-white/10 ${prominent ? 'h-2' : 'h-1.5'}`}><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
+            <div className="min-w-0"><div className="flex justify-between gap-2"><p className={`truncate font-bold ${prominent ? 'text-lg sm:text-xl' : 'text-sm sm:text-base'}`}>{unit.name}</p><span className="text-xs text-white/45">{type === 'sales' ? (typeof unit.orders === 'number' ? `${unit.orders} vendas` : '—') : 'preparo'}</span></div><div className={`mt-2 overflow-hidden rounded-full bg-white/10 ${prominent ? 'h-2' : 'h-1.5'}`}><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: unit.accent }} /></div></div>
             <div className="text-right"><strong className={`block font-display text-[#F9F6EC] ${prominent ? 'text-2xl sm:text-3xl' : 'text-base sm:text-lg'}`}>{value}</strong>{showPoints ? <span className="text-xs font-extrabold text-[#F4B942]">+{points} pts</span> : null}</div>
           </li>
         })}

@@ -116,9 +116,9 @@ function summarize(days, snapshots) {
 }
 
 /**
- * O mês inteiro não cabe numa resposta: cada dia pede vendas e histórico.
- * Esta chamada baixa no máximo um dia que ainda não está em cache e deixa
- * o restante para continuar depois que a TV já recebeu o 200.
+ * A média do mês sai dos dias que já estão em cache, sem esperar o mês inteiro.
+ * Só busca a Saipos nesta resposta quando ainda não existe nenhum tempo.
+ * Os dias que faltam continuam em segundo plano, do mais recente para o mais antigo.
  */
 export async function loadCompetitionSpan({ unitId, token, start, end, today, signal, fresh = false }) {
   const days = eachDay(start, end)
@@ -126,15 +126,15 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, si
   const missing = []
 
   for (const day of days) {
-    const closed = day < today
     const cached = fresh && day === end ? null : await readDay(unitId, day)
     if (cached) snapshots.set(day, cached)
     else missing.push(day)
   }
 
-  const nextDay = missing[0]
-  let failed = false
-  if (nextDay) {
+  const hasAverage = [...snapshots.values()].some((snapshot) => snapshot.samples > 0)
+  const nextDay = [...missing].reverse().find((day) => day <= today)
+  let failedDay = ''
+  if (!hasAverage && nextDay) {
     if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
     try {
       const snapshot = await loadDay({
@@ -149,11 +149,11 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, si
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error
       if (snapshots.size === 0) throw error
-      failed = true
+      failedDay = nextDay
     }
   }
 
-  const stillMissing = failed ? [] : days.filter((day) => !snapshots.has(day))
+  const stillMissing = [...days].reverse().filter((day) => !snapshots.has(day) && day !== failedDay)
   const partial = days.some((day) => !snapshots.has(day))
   const totals = summarize(days, snapshots)
 
@@ -180,7 +180,7 @@ async function fillDays({ unitId, token, today, days }) {
         closed: day < today,
       })
     } catch {
-      return
+      // Um dia lento não pode segurar a média dos outros.
     }
   }
 }

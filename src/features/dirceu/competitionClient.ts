@@ -83,12 +83,16 @@ export async function loadCompetitionUnits({
     if (signal?.aborted) return { loaded, error: primaryError, pending }
     try {
       const payload = await fetchCompetitionUnit({ unitId, date, period, kitchen, signal })
-      if (payload.partial || !payload.unit) {
+      if (!payload.unit) {
         pending = true
         continue
       }
+      if (payload.partial) pending = true
+      const hasKitchen = typeof payload.unit.kitchenMinutes === 'number'
+      const hasOrders = typeof payload.unit.orders === 'number'
+      if (!hasKitchen && !hasOrders) continue
       onUnit(payload.unit, payload.fetchedAt)
-      loaded.push(unitId)
+      if (!payload.partial) loaded.push(unitId)
     } catch (error) {
       if (signal?.aborted) return { loaded, error: primaryError, pending }
       if (!primaryError) primaryError = error instanceof Error ? error.message : 'Não foi possível atualizar a unidade.'

@@ -41,7 +41,7 @@ async function loadMonth({ unit, date, kitchenOnly, dailyRanking, signal, fresh 
     signal,
     fresh,
   })
-  const ready = !span.partial
+  const salesReady = !span.partial
   return {
     payload: {
       date,
@@ -51,10 +51,10 @@ async function loadMonth({ unit, date, kitchenOnly, dailyRanking, signal, fresh 
       unit: {
         id: unit.id,
         name: unit.name,
-        orders: ready && !kitchenOnly ? span.orders : null,
-        kitchenMinutes: ready ? span.kitchenMinutes : null,
+        orders: salesReady && !kitchenOnly ? span.orders : null,
+        kitchenMinutes: span.kitchenMinutes ?? null,
       },
-      ...(dailyRanking && ready ? { days: span.days } : {}),
+      ...(dailyRanking && salesReady ? { days: span.days } : {}),
     },
     fill: span.fill,
   }
