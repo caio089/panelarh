@@ -1,5 +1,5 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { CandidateStatus, Candidato } from '@/types'
+import { getSupabase } from '@/lib/supabaseClient'
 
 const STATUSES = new Set<CandidateStatus>(['pendente', 'entrevista', 'aprovada', 'reprovada', 'banco'])
 
@@ -20,22 +20,8 @@ type CandidatoRow = {
 const COLUMNS =
   'id, vaga_id, nome, info_complementar, experiencia, referencia, status, data_inicio_treinamento, curriculo_url, curriculo_nome, criado_em'
 
-let database: SupabaseClient | null | undefined
-
-function getDatabase() {
-  if (database !== undefined) return database
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  if (!url || !key || url.includes('seu-projeto')) {
-    database = null
-    return database
-  }
-  database = createClient(url, key)
-  return database
-}
-
 function requireDatabase() {
-  const supabase = getDatabase()
+  const supabase = getSupabase()
   if (!supabase) throw new Error('Banco de candidatos não configurado neste ambiente.')
   return supabase
 }

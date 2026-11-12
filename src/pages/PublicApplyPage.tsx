@@ -24,7 +24,7 @@ export function PublicApplyPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { isStaff } = useAuth()
-  const { getVaga, submitPublicApplication, store } = useData()
+  const { getVaga, submitPublicApplication, store, sharedReady } = useData()
 
   const vaga = id ? getVaga(id) : undefined
   const saved = id ? loadApplyDraft(id) : null
@@ -51,6 +51,18 @@ export function PublicApplyPage() {
     if (!id || submitted.current) return
     saveApplyDraft(id, { step, personal, job, shifts, experience })
   }, [id, step, personal, job, shifts, experience])
+
+  if (!sharedReady) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <PublicHeader />
+        <div className="mx-auto w-full max-w-xl flex-1 px-5 py-16 text-center">
+          <p className="font-display text-2xl text-[#F7F4EC]">Carregando vaga…</p>
+        </div>
+        <PublicFooter />
+      </div>
+    )
+  }
 
   if (!vaga || !vaga.ativa) {
     return (

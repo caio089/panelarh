@@ -5,7 +5,7 @@ import { PublicHeader, PublicFooter, EmptyState } from '@/components/Layout'
 import { Button } from '@/components/ui'
 
 export function CareersPage() {
-  const { store, vagasError } = useData()
+  const { store, vagasError, sharedReady } = useData()
   const vagas = store.vagas.filter((v) => v.ativa)
 
   return (
@@ -51,16 +51,20 @@ export function CareersPage() {
           <div>
             <h2 className="font-display text-2xl text-[#F7F4EC] sm:text-3xl">Vagas abertas</h2>
             <p className="mt-1 text-sm pv-cream-text">
-              {vagas.length === 0
-                ? 'Nenhuma oportunidade no momento'
-                : `${vagas.length} oportunidade${vagas.length === 1 ? '' : 's'} no momento`}
+              {!sharedReady
+                ? 'Carregando vagas…'
+                : vagas.length === 0
+                  ? 'Nenhuma oportunidade no momento'
+                  : `${vagas.length} oportunidade${vagas.length === 1 ? '' : 's'} no momento`}
             </p>
           </div>
         </div>
 
         {vagasError ? <p className="mb-4 text-sm text-[var(--pv-cream)]/80">{vagasError}</p> : null}
 
-        {vagas.length === 0 ? (
+        {!sharedReady ? (
+          <EmptyState tone="dark" title="Carregando vagas" description="Buscando as oportunidades abertas nas casas." />
+        ) : vagas.length === 0 ? (
           <EmptyState
             tone="dark"
             title="Nenhuma vaga aberta agora"

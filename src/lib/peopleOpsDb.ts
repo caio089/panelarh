@@ -1,5 +1,5 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { rhSessionToken } from './rhAccess'
+import { getSupabase } from '@/lib/supabaseClient'
 
 export interface PeopleOpsOverview {
   treinamentos_pendentes: number
@@ -8,14 +8,8 @@ export interface PeopleOpsOverview {
   sid_abertos: number
 }
 
-let database: SupabaseClient | null | undefined
-
 function client() {
-  if (database !== undefined) return database
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  database = url && key ? createClient(url, key) : null
-  return database
+  return getSupabase()
 }
 
 export async function loadPeopleOpsOverview(): Promise<PeopleOpsOverview | null> {

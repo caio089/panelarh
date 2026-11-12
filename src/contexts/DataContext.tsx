@@ -70,6 +70,7 @@ interface PublicApplicationInput {
 
 interface DataContextValue {
   store: AppStore
+  sharedReady: boolean
   vagasError: string
   candidatosError: string
   resetDemoData: () => void
@@ -128,6 +129,7 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<AppStore>(() => loadDemoStore())
+  const [sharedReady, setSharedReady] = useState(false)
   const [vagasError, setVagasError] = useState('')
   const [candidatosError, setCandidatosError] = useState('')
   const vagaWrite = useRef(0)
@@ -191,6 +193,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const message = err instanceof Error ? err.message : 'Não foi possível carregar o painel.'
       if (message.includes('candidat')) setCandidatosError(message)
       else setVagasError(message)
+    } finally {
+      setSharedReady(true)
     }
   }, [])
 
@@ -477,6 +481,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       store,
+      sharedReady,
       vagasError,
       candidatosError,
       resetDemoData,
@@ -496,6 +501,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }),
     [
       store,
+      sharedReady,
       vagasError,
       candidatosError,
       resetDemoData,

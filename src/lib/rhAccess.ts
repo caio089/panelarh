@@ -1,18 +1,9 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { getSupabase } from '@/lib/supabaseClient'
 
-let database: SupabaseClient | null | undefined
 const RH_SESSION_KEY = 'panela-rh-session'
 
 function client() {
-  if (database !== undefined) return database
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  if (!url || !key || url.includes('seu-projeto')) {
-    database = null
-    return database
-  }
-  database = createClient(url, key)
-  return database
+  return getSupabase()
 }
 
 function readable(error: { message?: string } | null, fallback: string) {

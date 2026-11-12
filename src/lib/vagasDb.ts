@@ -1,5 +1,6 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Vaga } from '@/types'
+import { getSupabase } from '@/lib/supabaseClient'
 
 /** O painel usa estes ids. No banco a unidade é o uuid da tabela units. */
 const UNIT_ID_BY_NAME: Record<string, string> = {
@@ -35,18 +36,8 @@ type VagaRow = {
 const VAGA_COLUMNS =
   'id, titulo, descricao, localidade, tipo, ativa, criada_em, salario, horario, regime, responsabilidades, requisitos, diferenciais, beneficios, units(name)'
 
-let database: SupabaseClient | null | undefined
-
 function getDatabase() {
-  if (database !== undefined) return database
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  if (!url || !key || url.includes('seu-projeto')) {
-    database = null
-    return database
-  }
-  database = createClient(url, key)
-  return database
+  return getSupabase()
 }
 
 function unitNameOf(units: VagaRow['units']) {

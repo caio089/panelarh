@@ -1,5 +1,5 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { rhSessionToken } from './rhAccess'
+import { getSupabase } from '@/lib/supabaseClient'
 
 export interface RhUnit { id: string; name: string }
 export interface RhCollaborator {
@@ -38,13 +38,8 @@ export interface CollaboratorHistoryEvent {
   id: string; event_type: string; event_date: string; title: string; summary: string; created_at: string
 }
 
-let database: SupabaseClient | null | undefined
 function client() {
-  if (database !== undefined) return database
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  database = url && key ? createClient(url, key) : null
-  return database
+  return getSupabase()
 }
 function token() {
   const value = rhSessionToken()
