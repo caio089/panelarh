@@ -7,33 +7,36 @@ const FICHA_LABELS: Record<string, string> = {
   WhatsApp: 'WhatsApp',
   CPF: 'CPF',
   Bairro: 'Bairro',
-  Idade: 'Idade',
-  Unidade: 'Unidade de preferência',
-  'Unidade de preferência': 'Unidade de preferência',
+  Idade: 'Tem 18 anos ou mais',
+  Unidade: 'Casa de preferência',
+  'Unidade de preferência': 'Casa de preferência',
   Turnos: 'Turnos',
-  'Fim de semana': 'Pode trabalhar no fim de semana',
-  'Como chega': 'Como chega no trabalho',
-  Feriados: 'Pode trabalhar em feriados',
+  'Fim de semana': 'Fim de semana',
+  'Como chega': 'Chega no horário',
+  Feriados: 'Feriados',
   Restaurante: 'Já trabalhou em restaurante',
-  Funções: 'O que já fez',
+  Funções: 'Funções em que se sente à vontade',
   'Último trabalho': 'Último trabalho',
-  'No dia a dia': 'O que fazia no dia a dia',
-  'Por que a vaga': 'Por que quer esta vaga',
-  Motivação: 'Por que quer esta vaga',
+  'No dia a dia': 'Como se sai no movimento',
+  Ritmo: 'Como se sai no movimento',
+  'Por que a vaga': 'Por que esta vaga',
+  Motivação: 'Por que esta vaga',
   Começa: 'Quando pode começar',
-  'Carteira de trabalho': 'Tem carteira de trabalho',
-  'Como soube': 'Como ficou sabendo da vaga',
-  'Fica em pé': 'Consegue ficar o turno em pé',
-  'Restrição de horário': 'Restrição de horário',
+  'Carteira de trabalho': 'Carteira de trabalho',
+  'Conhece a casa': 'Já conhece a Panela Velha',
+  'Como soube': 'Como conheceu a vaga',
+  'Fica em pé': 'Como se sai no movimento',
+  'Restrição de horário': 'Compromisso a respeitar',
+  Compromisso: 'Compromisso a respeitar',
   Sobre: 'Sobre a pessoa',
   Referência: 'Referência',
 }
 
 const LONG_LABELS = new Set([
   'Último trabalho',
-  'O que fazia no dia a dia',
-  'Por que quer esta vaga',
-  'Restrição de horário',
+  'Como se sai no movimento',
+  'Por que esta vaga',
+  'Compromisso a respeitar',
   'Sobre a pessoa',
 ])
 
@@ -76,7 +79,7 @@ function ApplicationFicha({
   for (const [raw, value] of infoRows) {
     const label = displayLabel(raw)
     const shown = displayValue(raw, value)
-    if (LONG_LABELS.has(label)) stories.push([label, shown])
+    if (LONG_LABELS.has(label) && shown.length > 40) stories.push([label, shown])
     else facts.push([label, shown])
   }
 

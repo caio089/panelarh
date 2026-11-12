@@ -72,7 +72,6 @@ interface PublicApplicationInput {
   startWhen: string
   workCard: string
   source: string
-  standing: string
   restriction: string
   curriculoUrl?: string | null
   curriculoNome?: string | null
@@ -139,13 +138,12 @@ function buildPublicApplicationInfo(input: PublicApplicationInput) {
     `Restaurante: ${input.workedRestaurant}`,
     optionalLine('Funções', input.roles),
     `Último trabalho: ${oneLine(input.experience)}`,
-    `No dia a dia: ${oneLine(input.dailyWork)}`,
+    `Ritmo: ${oneLine(input.dailyWork)}`,
     `Por que a vaga: ${oneLine(input.whyRole)}`,
     `Começa: ${input.startWhen}`,
-    optionalLine('Carteira de trabalho', input.workCard),
+    optionalLine('Conhece a casa', input.workCard),
     optionalLine('Como soube', input.source),
-    optionalLine('Fica em pé', input.standing),
-    optionalLine('Restrição de horário', input.restriction),
+    optionalLine('Compromisso', input.restriction),
   ]
     .filter(Boolean)
     .join('\n')
@@ -176,6 +174,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
       setVagasError('')
       setCandidatosError('')
+      // Só lê o banco. Nunca regrava a lista do navegador em candidatos/vagas.
       setStore((prev) => ({ ...prev, vagas, candidatos }))
     } catch (err) {
       if (seenVagas !== vagaWrite.current || seenCandidatos !== candidatoWrite.current) return
@@ -194,16 +193,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [pullShared])
-
-  // Outra aba no mesmo navegador pede a lista do banco de novo.
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (!event.key?.startsWith('panela-demo-store')) return
-      void pullShared()
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
   }, [pullShared])
 
   const resetDemoData = useCallback(() => {
@@ -354,18 +343,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     try {
       await deleteRemoteCandidato(candidatoId)
       setCandidatosError('')
-      setStore((prev) => {
-        const next = {
-          ...prev,
-          candidatos: prev.candidatos.filter((candidato) => {
-            if (candidato.id === candidatoId) return false
-            return !(identity && candidatoIdentity(candidato) === identity)
-          }),
-          messages: prev.messages.filter((message) => message.candidato_id !== candidatoId),
-        }
-        saveDemoStore(next)
-        return next
-      })
+      setStore((prev) => ({
+        ...prev,
+        candidatos: prev.candidatos.filter((candidato) => {
+          if (candidato.id === candidatoId) return false
+          return !(identity && candidatoIdentity(candidato) === identity)
+        }),
+        messages: prev.messages.filter((message) => message.candidato_id !== candidatoId),
+      }))
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Não foi possível excluir o candidato.'
       setCandidatosError(message)

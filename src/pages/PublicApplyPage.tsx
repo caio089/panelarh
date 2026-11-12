@@ -4,22 +4,23 @@ import { ArrowLeft, Check, CheckCircle2, Paperclip, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useData } from '@/contexts/DataContext'
 import {
-  COMMUTE_OPTIONS,
+  ADULT_OPTIONS,
+  ARRIVAL_OPTIONS,
   FORM_SHIFTS,
   FORM_STEPS,
   HOLIDAY_OPTIONS,
+  HOUSE_OPTIONS,
   RESTAURANT_OPTIONS,
   ROLE_OPTIONS,
+  RUSH_OPTIONS,
   SOURCE_OPTIONS,
-  STANDING_OPTIONS,
   START_OPTIONS,
   WEEKEND_OPTIONS,
-  WORK_CARD_OPTIONS,
   clearApplyDraft,
   emptyApplyDraft,
   formatCpf,
   formatPhone,
-  isValidAge,
+  isAdultAnswer,
   loadApplyDraft,
   saveApplyDraft,
 } from '@/lib/applicationForm'
@@ -128,20 +129,22 @@ export function PublicApplyPage() {
         if (!personal.full_name.trim() || personal.cpf.length !== 11 || personal.phone.length < 10 || !personal.city.trim()) {
           throw new Error('Preencha nome, CPF, WhatsApp e bairro.')
         }
-        if (!isValidAge(personal.age)) throw new Error('Informe uma idade entre 16 e 70 anos.')
+        if (!isAdultAnswer(personal.age)) throw new Error('Diga se você tem 18 anos ou mais.')
       }
       if (step === 1) {
         if (!job.preferred_unit || !job.weekend || !job.commute || !job.holidays || shifts.length === 0) {
-          throw new Error('Escolha a unidade, os turnos, o fim de semana, os feriados e como você chega.')
+          throw new Error('Escolha a casa, os turnos, o fim de semana, os feriados e se chega no horário.')
         }
       }
       if (step === 2) {
-        if (!experience.worked || !experience.start) {
-          throw new Error('Diga se já trabalhou em restaurante e quando pode começar.')
+        if (!experience.worked || !experience.start || !experience.daily) {
+          throw new Error('Conte se já trabalhou na área, como se sai no movimento e quando pode começar.')
         }
-        if (experience.roles.length === 0) throw new Error('Marque o que você já fez, mesmo que seja o primeiro emprego.')
-        if (experience.detail.trim().length < 20 || experience.daily.trim().length < 20 || experience.why.trim().length < 20) {
-          throw new Error('Escreva um pouco mais nos três textos. O RH precisa entender seu trabalho.')
+        if (experience.roles.length === 0) {
+          throw new Error('Marque as funções em que você se sente à vontade, mesmo que seja o primeiro emprego.')
+        }
+        if (experience.detail.trim().length < 20 || experience.why.trim().length < 20) {
+          throw new Error('Escreva um pouco mais sobre o último trabalho e sobre esta vaga.')
         }
       }
       if (step < LAST_STEP) {
@@ -149,8 +152,8 @@ export function PublicApplyPage() {
         return
       }
 
-      if (!extra.workCard || !extra.source || !extra.standing) {
-        throw new Error('Responda carteira de trabalho, como soube da vaga e se aguenta o turno em pé.')
+      if (!extra.workCard || !extra.source) {
+        throw new Error('Diga se já conhece a casa e como ficou sabendo da vaga.')
       }
 
       if (!vaga || !id) return
@@ -182,7 +185,6 @@ export function PublicApplyPage() {
         startWhen: experience.start,
         workCard: extra.workCard,
         source: extra.source,
-        standing: extra.standing,
         restriction: extra.restriction.trim(),
         curriculoUrl,
         curriculoNome,
@@ -239,7 +241,7 @@ export function PublicApplyPage() {
           <p className="pv-eyebrow">Candidatura</p>
           <h1 className="mt-1 font-display text-2xl text-[var(--pv-navy)] sm:text-3xl">{vaga.titulo}</h1>
           <p className="mt-1 text-sm text-[var(--pv-muted)]">
-            {vaga.unitName || 'Panela Velha'} · quatro passos. Se sair e voltar, as respostas continuam aqui.
+            {vaga.unitName || 'Panela Velha'} · perguntas curtas, só o que o RH precisa para te chamar.
           </p>
 
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-[#E7E2D3]">
@@ -287,14 +289,14 @@ export function PublicApplyPage() {
                     placeholder="(86) 90000-0000"
                   />
                 </Field>
-                <Field label="Bairro onde mora *">
+                <Field label="Bairro *" hint="Para ver a casa mais perto de você">
                   <Input
                     value={personal.city}
                     onChange={(event) => setPersonal({ ...personal, city: event.target.value })}
                     placeholder="Ex.: Dirceu"
                   />
                 </Field>
-                <Field label="CPF *" hint="Só os números, para o cadastro">
+                <Field label="CPF *" hint="Só para não duplicar a candidatura">
                   <Input
                     inputMode="numeric"
                     value={formatCpf(personal.cpf)}
@@ -304,22 +306,18 @@ export function PublicApplyPage() {
                     placeholder="000.000.000-00"
                   />
                 </Field>
-                <Field label="Idade *" hint="Precisa ter pelo menos 16 anos">
-                  <Input
-                    inputMode="numeric"
-                    value={personal.age}
-                    onChange={(event) =>
-                      setPersonal({ ...personal, age: event.target.value.replace(/\D/g, '').slice(0, 2) })
-                    }
-                    placeholder="Ex.: 24"
-                  />
-                </Field>
+                <Choices
+                  label="Você tem 18 anos ou mais? *"
+                  value={personal.age}
+                  options={ADULT_OPTIONS}
+                  onChange={(age) => setPersonal({ ...personal, age })}
+                />
               </>
             ) : null}
 
             {step === 1 ? (
               <>
-                <Field label="Unidade de preferência *">
+                <Field label="Qual casa você quer? *">
                   <Select
                     value={job.preferred_unit}
                     onChange={(event) => setJob({ ...job, preferred_unit: event.target.value })}
@@ -333,27 +331,27 @@ export function PublicApplyPage() {
                   </Select>
                 </Field>
                 <Choices
-                  label="Turnos que consegue trabalhar *"
+                  label="Quais turnos cabem na sua rotina? *"
                   values={shifts}
                   options={FORM_SHIFTS}
                   onToggle={toggleShift}
                 />
                 <Choices
-                  label="Pode trabalhar no fim de semana? *"
+                  label="A casa trabalha sábado e domingo. Você consegue? *"
                   value={job.weekend}
                   options={WEEKEND_OPTIONS}
                   onChange={(weekend) => setJob({ ...job, weekend })}
                 />
                 <Choices
-                  label="Pode trabalhar em feriados? *"
+                  label="E em feriado? *"
                   value={job.holidays}
                   options={HOLIDAY_OPTIONS}
                   onChange={(holidays) => setJob({ ...job, holidays })}
                 />
                 <Choices
-                  label="Como você chega no trabalho? *"
+                  label="Consegue chegar na unidade no horário do turno? *"
                   value={job.commute}
-                  options={COMMUTE_OPTIONS}
+                  options={ARRIVAL_OPTIONS}
                   onChange={(commute) => setJob({ ...job, commute })}
                 />
               </>
@@ -362,46 +360,44 @@ export function PublicApplyPage() {
             {step === 2 ? (
               <>
                 <Choices
-                  label="Já trabalhou em restaurante, lanchonete ou bar? *"
+                  label="Já trabalhou em restaurante, lanchonete ou pizzaria? *"
                   value={experience.worked}
                   options={RESTAURANT_OPTIONS}
                   onChange={(worked) => setExperience({ ...experience, worked })}
                 />
                 <Choices
-                  label="O que você já fez? *"
+                  label="Em quais funções você se sente à vontade? *"
                   values={experience.roles}
                   options={ROLE_OPTIONS}
                   onToggle={toggleRole}
                 />
                 <Field
-                  label="Último trabalho *"
-                  hint="Casa, função e por quanto tempo. Se for o primeiro, escreva isso."
+                  label="Conte do último trabalho *"
+                  hint="Onde foi, o que fazia e por quanto tempo. Se for o primeiro emprego, escreva isso."
                 >
                   <Textarea
                     rows={3}
                     value={experience.detail}
                     onChange={(event) => setExperience({ ...experience, detail: event.target.value })}
-                    placeholder="Ex.: Atendente no salão do restaurante do centro, de 2023 a 2024."
+                    placeholder="Ex.: Atendi mesas no salão de uma pizzaria do Dirceu por um ano."
                   />
                 </Field>
-                <Field label="O que você fazia no dia a dia? *" hint="Duas ou três frases, com o que o RH precisa saber.">
-                  <Textarea
-                    rows={3}
-                    value={experience.daily}
-                    onChange={(event) => setExperience({ ...experience, daily: event.target.value })}
-                    placeholder="Ex.: Anotava pedidos, servia mesas e fechava a conta no caixa."
-                  />
-                </Field>
-                <Field label="Por que quer esta vaga? *">
+                <Choices
+                  label="Quando a casa enche, como você se sai? *"
+                  value={experience.daily}
+                  options={RUSH_OPTIONS}
+                  onChange={(daily) => setExperience({ ...experience, daily })}
+                />
+                <Field label="Por que quer trabalhar nesta vaga? *">
                   <Textarea
                     rows={3}
                     value={experience.why}
                     onChange={(event) => setExperience({ ...experience, why: event.target.value })}
-                    placeholder="Ex.: Quero trabalhar no atendimento da unidade do Dirceu e aprender o ritmo da casa."
+                    placeholder="Ex.: Quero o atendimento do Dirceu e aprender o ritmo da Panela Velha."
                   />
                 </Field>
                 <Choices
-                  label="Quando pode começar? *"
+                  label="Quando consegue começar? *"
                   value={experience.start}
                   options={START_OPTIONS}
                   onChange={(start) => setExperience({ ...experience, start })}
@@ -412,36 +408,33 @@ export function PublicApplyPage() {
             {step === 3 ? (
               <>
                 <Choices
-                  label="Tem carteira de trabalho? *"
+                  label="Já conhece a Panela Velha? *"
                   value={extra.workCard}
-                  options={WORK_CARD_OPTIONS}
+                  options={HOUSE_OPTIONS}
                   onChange={(workCard) => setExtra({ ...extra, workCard })}
                 />
                 <Choices
-                  label="Como ficou sabendo da vaga? *"
+                  label="Como ficou sabendo desta vaga? *"
                   value={extra.source}
                   options={SOURCE_OPTIONS}
                   onChange={(source) => setExtra({ ...extra, source })}
                 />
-                <Choices
-                  label="Consegue ficar o turno inteiro em pé? *"
-                  value={extra.standing}
-                  options={STANDING_OPTIONS}
-                  onChange={(standing) => setExtra({ ...extra, standing })}
-                />
-                <Field label="Alguma restrição de horário?" hint="Opcional">
+                <Field
+                  label="Tem algum compromisso que o RH precisa respeitar?"
+                  hint="Estudo, outro trabalho, um dia da semana. Se não tiver, deixe em branco."
+                >
                   <Textarea
                     rows={2}
                     value={extra.restriction}
                     onChange={(event) => setExtra({ ...extra, restriction: event.target.value })}
-                    placeholder="Ex.: Preciso sair às terças até 18h."
+                    placeholder="Ex.: Estudo até as 18h nas terças."
                   />
                 </Field>
                 <div>
                   <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
-                    Currículo (opcional)
+                    Currículo, se quiser
                   </p>
-                  <p className="mb-2 text-xs text-[var(--pv-muted)]">PDF, Word ou foto. Até 5 MB. Quem já se candidatou sem arquivo continua no painel.</p>
+                  <p className="mb-2 text-xs text-[var(--pv-muted)]">PDF, Word ou foto. Até 5 MB. Não é obrigatório.</p>
                   <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--pv-line-strong)] bg-[#FBF9F3] px-3.5 py-3 text-sm text-[var(--pv-navy)] hover:bg-[#F1EDE0]">
                     <span className="inline-flex min-w-0 items-center gap-2">
                       <Paperclip size={16} />

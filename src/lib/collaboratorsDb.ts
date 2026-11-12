@@ -35,7 +35,13 @@ export interface CollaboratorDossier {
   company_cnpj: string | null
 }
 export interface CollaboratorHistoryEvent {
-  id: string; event_type: string; event_date: string; title: string; summary: string; created_at: string
+  id: string
+  event_type: string
+  event_date: string
+  title: string
+  summary: string
+  source_kind?: string
+  created_at: string
 }
 
 function client() {
@@ -75,3 +81,13 @@ export const createRhCollaborator = (input: { unitId: string; fullName: string; 
 export const registerRhOccurrence = (input: { collaboratorId: string; kind: string; occurredOn: string; note: string; days: number }) => call<string>('rh_register_occurrence', { p_collaborator_id: input.collaboratorId, p_kind: input.kind, p_occurred_on: input.occurredOn, p_note: input.note, p_days: input.days })
 export const registerRhSid = (input: { collaboratorId: string; referenceCode: string; category: string; occurredOn: string; notes: string }) => call<string>('rh_register_sid', { p_collaborator_id: input.collaboratorId, p_reference_code: input.referenceCode, p_category: input.category, p_occurred_on: input.occurredOn, p_notes: input.notes })
 export const registerRhDocument = (input: { collaboratorId: string; kind: string; competence?: string; notes: string }) => call<string>('rh_register_document', { p_collaborator_id: input.collaboratorId, p_kind: input.kind, p_competence: input.competence || null, p_notes: input.notes })
+export const updateRhHistoryEvent = (input: { eventId: string; eventDate: string; summary: string }) =>
+  call<null>('rh_update_collaborator_history', {
+    p_event_id: input.eventId,
+    p_event_date: input.eventDate,
+    p_summary: input.summary,
+  })
+export const deleteRhHistoryEvent = (eventId: string) =>
+  call<null>('rh_delete_collaborator_history', { p_event_id: eventId })
+export const clearRhHistory = (collaboratorId: string) =>
+  call<number>('rh_clear_collaborator_history', { p_collaborator_id: collaboratorId })

@@ -1,35 +1,36 @@
-/** Perguntas da candidatura pública. Campos novos são opcionais no banco: quem já se cadastrou continua visível. */
+/** Perguntas da candidatura. Campos novos não apagam ficha de quem já se candidatou. */
 
-export const FORM_STEPS = ['Contato', 'Horário', 'Experiência', 'Você'] as const
+export const FORM_STEPS = ['Seus dados', 'Sua rotina', 'Seu trabalho', 'Para fechar'] as const
 
 export const FORM_SHIFTS = ['Manhã', 'Tarde', 'Noite', 'Madrugada'] as const
 
-export const WEEKEND_OPTIONS = ['Sim', 'Não', 'Só um dos dias'] as const
+export const WEEKEND_OPTIONS = ['Sim, sábado e domingo', 'Só um dos dias', 'Não consigo'] as const
 
-export const COMMUTE_OPTIONS = ['A pé', 'Ônibus', 'Moto ou carro', 'Carona'] as const
+export const ARRIVAL_OPTIONS = ['Sim, chego no horário', 'Preciso combinar o ponto'] as const
 
-export const RESTAURANT_OPTIONS = ['Sim', 'Ainda não'] as const
+export const RESTAURANT_OPTIONS = ['Sim, já trabalhei', 'Ainda não, seria o primeiro'] as const
 
-export const START_OPTIONS = ['Hoje', 'Esta semana', 'Este mês'] as const
+export const START_OPTIONS = ['Ainda hoje', 'Esta semana', 'Até 15 dias'] as const
 
-export const HOLIDAY_OPTIONS = ['Sim', 'Não', 'Combinar'] as const
+export const HOLIDAY_OPTIONS = ['Sim', 'Só alguns', 'Não consigo'] as const
+
+export const ADULT_OPTIONS = ['Sim, tenho 18 ou mais', 'Ainda não'] as const
 
 export const ROLE_OPTIONS = [
-  'Atendimento',
+  'Salão e atendimento',
   'Caixa',
   'Cozinha',
-  'Chapa / forno',
-  'Delivery',
-  'Limpeza',
-  'Estoque',
+  'Forno e pizza',
+  'Entrega',
+  'Apoio e limpeza',
   'Primeiro emprego',
 ] as const
 
-export const WORK_CARD_OPTIONS = ['Sim', 'Não', 'Vou tirar'] as const
+export const HOUSE_OPTIONS = ['Já comi na casa', 'Conheço de vista', 'Ainda não'] as const
 
-export const SOURCE_OPTIONS = ['Instagram', 'Indicação', 'Já como na casa', 'Outro'] as const
+export const SOURCE_OPTIONS = ['Instagram', 'Indicação de alguém', 'Já sou cliente', 'Outro'] as const
 
-export const STANDING_OPTIONS = ['Sim, o turno todo', 'Com pausas', 'Não'] as const
+export const RUSH_OPTIONS = ['Me organizo bem', 'Ainda estou pegando o jeito', 'Prefiro um ritmo mais calmo'] as const
 
 export type FormShift = (typeof FORM_SHIFTS)[number]
 
@@ -39,7 +40,7 @@ export interface ApplyDraft {
   job: { preferred_unit: string; weekend: string; commute: string; holidays: string }
   shifts: string[]
   experience: { worked: string; detail: string; daily: string; why: string; start: string; roles: string[] }
-  extra: { workCard: string; source: string; standing: string; restriction: string }
+  extra: { workCard: string; source: string; restriction: string }
 }
 
 const DRAFT_PREFIX = 'panela-apply-draft:'
@@ -59,6 +60,15 @@ function list(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item)) : []
 }
 
+function adultFromDraft(value: unknown) {
+  const raw = text(value)
+  if (ADULT_OPTIONS.includes(raw as (typeof ADULT_OPTIONS)[number])) return raw
+  const age = Number(digits(raw, 2))
+  if (age >= 18) return ADULT_OPTIONS[0]
+  if (age > 0) return ADULT_OPTIONS[1]
+  return ''
+}
+
 export function applyDraftKey(vagaId: string) {
   return `${DRAFT_PREFIX}${vagaId}`
 }
@@ -69,7 +79,7 @@ export function emptyApplyDraft(): Omit<ApplyDraft, 'step'> {
     job: { preferred_unit: '', weekend: '', commute: '', holidays: '' },
     shifts: [],
     experience: { worked: '', detail: '', daily: '', why: '', start: '', roles: [] },
-    extra: { workCard: '', source: '', standing: '', restriction: '' },
+    extra: { workCard: '', source: '', restriction: '' },
   }
 }
 
@@ -88,7 +98,7 @@ export function loadApplyDraft(vagaId: string): ApplyDraft | null {
         cpf: digits(parsed.personal.cpf, 11),
         phone: digits(parsed.personal.phone, 11),
         city: text(parsed.personal.city),
-        age: digits(parsed.personal.age, 2),
+        age: adultFromDraft(parsed.personal.age),
       },
       job: {
         ...blank.job,
@@ -111,7 +121,6 @@ export function loadApplyDraft(vagaId: string): ApplyDraft | null {
         ...blank.extra,
         workCard: text(parsed.extra?.workCard),
         source: text(parsed.extra?.source),
-        standing: text(parsed.extra?.standing),
         restriction: text(parsed.extra?.restriction),
       },
     }
@@ -157,12 +166,6 @@ export function formatPhone(digitsValue: string) {
   return `(${value.slice(0, 2)}) ${value.slice(2, 7)}-${value.slice(7)}`
 }
 
-export function parseAge(value: string) {
-  const age = Number(digits(value, 2))
-  return Number.isInteger(age) ? age : 0
-}
-
-export function isValidAge(value: string) {
-  const age = parseAge(value)
-  return age >= 16 && age <= 70
+export function isAdultAnswer(value: string) {
+  return ADULT_OPTIONS.includes(value as (typeof ADULT_OPTIONS)[number])
 }

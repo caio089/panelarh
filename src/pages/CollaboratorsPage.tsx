@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, FileText, Plus, Search, UserRound } from 'lucide-react'
+import { ArrowLeft, FileText, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
 import { Alert, Button, Field, Input, Modal, PageHeader, Select, Textarea } from '@/components/ui'
+import { ConfirmDialog } from '@/features/gestao/components/ConfirmDialog'
 import { formatDateBR } from '@/lib/utils'
 import {
+  clearRhHistory,
   createRhCollaborator,
+  deleteRhHistoryEvent,
   listCollaboratorHistory,
   listRhCollaborators,
   listRhUnits,
   loadCollaboratorDossier,
   registerRhDocument,
   registerRhOccurrence,
+  updateRhHistoryEvent,
   type CollaboratorDossier,
   type CollaboratorHistoryEvent,
   type RhCollaborator,
@@ -58,6 +62,9 @@ export function CollaboratorsPage() {
   const [mode, setMode] = useState<FormMode | null>(null)
   const [filter, setFilter] = useState('')
   const [unitFilter, setUnitFilter] = useState('todas')
+  const [editing, setEditing] = useState<CollaboratorHistoryEvent | null>(null)
+  const [deleting, setDeleting] = useState<CollaboratorHistoryEvent | null>(null)
+  const [clearing, setClearing] = useState(false)
 
   const houseUnits = units.filter((unit) => HOUSES.includes(unit.name as (typeof HOUSES)[number]))
   const people = useMemo(() => collaborators.filter(isHousePerson), [collaborators])
@@ -151,6 +158,58 @@ export function CollaboratorsPage() {
     }
   }
 
+  async function refreshHistory(personId: string) {
+    setHistory((await listCollaboratorHistory(personId)) || [])
+  }
+
+  async function saveHistoryEdit(eventDate: string, summary: string) {
+    if (!selected || !editing) return
+    setSaving(true)
+    setFormError('')
+    try {
+      await updateRhHistoryEvent({ eventId: editing.id, eventDate, summary })
+      setEditing(null)
+      setNotice('Registro atualizado.')
+      await refreshHistory(selected.id)
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : 'Não foi possível editar o registro.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeHistoryEvent() {
+    if (!selected || !deleting) return
+    setSaving(true)
+    setPageError('')
+    try {
+      await deleteRhHistoryEvent(deleting.id)
+      setDeleting(null)
+      setNotice('Registro apagado do histórico.')
+      await refreshHistory(selected.id)
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : 'Não foi possível apagar o registro.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function wipeHistory() {
+    if (!selected) return
+    setSaving(true)
+    setPageError('')
+    try {
+      await clearRhHistory(selected.id)
+      setClearing(false)
+      setNotice('Histórico limpo. A admissão permanece na ficha.')
+      await refreshHistory(selected.id)
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : 'Não foi possível limpar o histórico.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="px-5 py-6 sm:px-8 sm:py-8">
       <PageHeader
@@ -196,16 +255,56 @@ export function CollaboratorsPage() {
                 setSelectedId(null)
                 setMode(null)
                 setFormError('')
+                setEditing(null)
+                setDeleting(null)
+                setClearing(false)
               }}
               onRecord={setMode}
               onRevealFile={() => void revealFile()}
               onSave={(input) => void saveRecord(input)}
+              onEditEvent={setEditing}
+              onDeleteEvent={setDeleting}
+              onClearHistory={() => setClearing(true)}
             />
           ) : (
             <EmptyPanel />
           )}
         </section>
       </div>
+
+      <EditHistoryModal
+        event={editing}
+        saving={saving}
+        error={formError}
+        onClose={() => {
+          setEditing(null)
+          setFormError('')
+        }}
+        onSave={(eventDate, summary) => void saveHistoryEdit(eventDate, summary)}
+      />
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        title="Apagar este registro?"
+        description={
+          deleting ? (
+            <>
+              Isso tira <strong>{HISTORY_LABEL[deleting.event_type] || deleting.event_type}</strong> de{' '}
+              {formatDateBR(deleting.event_date)} do histórico. A ficha da pessoa continua.
+            </>
+          ) : null
+        }
+        confirmLabel={saving ? 'Apagando…' : 'Apagar'}
+        onConfirm={() => void removeHistoryEvent()}
+        onClose={() => setDeleting(null)}
+      />
+      <ConfirmDialog
+        open={clearing}
+        title="Limpar o histórico?"
+        description="Apaga faltas, atestados, advertências e documentos desta pessoa. A admissão permanece na ficha."
+        confirmLabel={saving ? 'Limpando…' : 'Limpar histórico'}
+        onConfirm={() => void wipeHistory()}
+        onClose={() => setClearing(false)}
+      />
 
       <CreateCollaboratorModal
         open={showCreate}
@@ -319,6 +418,9 @@ function PersonPanel({
   onRecord,
   onRevealFile,
   onSave,
+  onEditEvent,
+  onDeleteEvent,
+  onClearHistory,
 }: {
   person: RhCollaborator
   dossier: CollaboratorDossier | null
@@ -331,6 +433,9 @@ function PersonPanel({
   onRecord: (mode: FormMode | null) => void
   onRevealFile: () => void
   onSave: (input: RecordInput) => void
+  onEditEvent: (event: CollaboratorHistoryEvent) => void
+  onDeleteEvent: (event: CollaboratorHistoryEvent) => void
+  onClearHistory: () => void
 }) {
   const [showFile, setShowFile] = useState(false)
   const counts = history.reduce<Record<string, number>>((total, event) => {
@@ -391,7 +496,14 @@ function PersonPanel({
       </button>
       {showFile ? <Dossier dossier={dossier} /> : null}
 
-      <h3 className="mt-6 font-display text-xl text-[var(--pv-ink)]">Histórico</h3>
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <h3 className="font-display text-xl text-[var(--pv-ink)]">Histórico</h3>
+        {history.some((event) => event.event_type !== 'admissao') ? (
+          <Button type="button" size="sm" variant="ghost" onClick={onClearHistory}>
+            Limpar histórico
+          </Button>
+        ) : null}
+      </div>
       {loading ? (
         <p className="mt-3 text-sm text-[var(--pv-muted)]">Abrindo ficha…</p>
       ) : history.length === 0 ? (
@@ -401,11 +513,23 @@ function PersonPanel({
           {history.map((event) => (
             <li key={event.id} className="relative">
               <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[var(--pv-terracotta)]" />
-              <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--pv-terracotta)]">
-                {HISTORY_LABEL[event.event_type] || event.event_type} · {formatDateBR(event.event_date)}
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-[var(--pv-ink)]">{event.title}</p>
-              {event.summary ? <p className="mt-1 text-sm text-[var(--pv-muted)]">{event.summary}</p> : null}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--pv-terracotta)]">
+                    {HISTORY_LABEL[event.event_type] || event.event_type} · {formatDateBR(event.event_date)}
+                  </p>
+                  <p className="mt-0.5 text-sm font-bold text-[var(--pv-ink)]">{event.title}</p>
+                  {event.summary ? <p className="mt-1 text-sm text-[var(--pv-muted)]">{event.summary}</p> : null}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onEditEvent(event)} aria-label="Editar registro">
+                    <Pencil size={14} /> Editar
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onDeleteEvent(event)} aria-label="Apagar registro">
+                    <Trash2 size={14} /> Apagar
+                  </Button>
+                </div>
+              </div>
             </li>
           ))}
         </ol>
@@ -453,6 +577,62 @@ function UnitChip({ active, label, onClick }: { active: boolean; label: string; 
     >
       {label}
     </button>
+  )
+}
+
+function EditHistoryModal({
+  event,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  event: CollaboratorHistoryEvent | null
+  saving: boolean
+  error: string
+  onClose: () => void
+  onSave: (eventDate: string, summary: string) => void
+}) {
+  const [eventDate, setEventDate] = useState(today())
+  const [summary, setSummary] = useState('')
+
+  useEffect(() => {
+    if (!event) return
+    setEventDate(event.event_date.slice(0, 10))
+    setSummary(event.summary || '')
+  }, [event])
+
+  return (
+    <Modal open={Boolean(event)} title="Editar registro" onClose={onClose}>
+      {event ? (
+        <form
+          className="space-y-4"
+          onSubmit={(formEvent) => {
+            formEvent.preventDefault()
+            onSave(eventDate, summary)
+          }}
+        >
+          <p className="text-sm text-[var(--pv-muted)]">
+            {HISTORY_LABEL[event.event_type] || event.event_type} · {event.title}
+          </p>
+          <Field label="Data">
+            <Input type="date" value={eventDate} onChange={(change) => setEventDate(change.target.value)} required />
+          </Field>
+          <Field label="Observação" hint="Sem CID, diagnóstico ou laudo.">
+            <Textarea value={summary} onChange={(change) => setSummary(change.target.value)} maxLength={1000} />
+          </Field>
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Salvando…' : 'Salvar alteração'}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </Modal>
   )
 }
 
