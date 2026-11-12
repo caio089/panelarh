@@ -487,7 +487,7 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
         try {
           await load(id, selected)
         } catch (error) {
-          if (controller.signal.aborted) return primaryError
+          if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return primaryError
           if (id === unitId && !primaryError) {
             primaryError = error instanceof Error ? error.message : 'Não foi possível atualizar vendas e tempos.'
           }

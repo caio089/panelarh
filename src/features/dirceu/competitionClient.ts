@@ -51,18 +51,7 @@ export async function fetchCompetitionUnit({
   if (date) params.set('dia', date)
   if (kitchen) params.set('dados', 'cozinha')
   if (daily) params.set('modo', 'diario')
-  const timeout = new AbortController()
-  const limit = daily || kitchen || period === 'mes' ? 60_000 : 20_000
-  const timer = window.setTimeout(() => timeout.abort(), limit)
-  const onAbort = () => timeout.abort()
-  signal?.addEventListener('abort', onAbort, { once: true })
-  let response: Response
-  try {
-    response = await fetch(`/api/competition?${params}`, { cache: 'no-store', signal: timeout.signal })
-  } finally {
-    window.clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
-  }
+  const response = await fetch(`/api/competition?${params}`, { cache: 'no-store', signal })
   const payload = await readJson<CompetitionResponse>(response)
   if (!response.ok || !payload.unit) {
     throw new Error(payload.error || 'Não foi possível atualizar a unidade.')
