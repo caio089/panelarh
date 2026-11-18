@@ -80,8 +80,8 @@ create table if not exists public.candidatos (
   status text not null default 'pendente'
     check (status in ('pendente', 'entrevista', 'aprovada', 'reprovada', 'banco')),
   data_inicio_treinamento date,
-  curriculo_url text,
-  curriculo_nome text,
+  curriculo_url text not null,
+  curriculo_nome text not null,
   criado_em timestamptz default now()
 );
 

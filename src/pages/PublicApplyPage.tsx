@@ -155,16 +155,15 @@ export function PublicApplyPage() {
       if (!extra.workCard || !extra.source) {
         throw new Error('Diga se já conhece a casa e como ficou sabendo da vaga.')
       }
+      if (!resume) {
+        throw new Error('Anexe uma foto do seu currículo para enviar a candidatura.')
+      }
 
       if (!vaga || !id) return
       setSaving(true)
-      let curriculoUrl: string | null = null
-      let curriculoNome: string | null = null
-      if (resume) {
-        const uploaded = await uploadCurriculo(resume, vaga.id)
-        curriculoUrl = uploaded.url
-        curriculoNome = uploaded.nome
-      }
+      const uploaded = await uploadCurriculo(resume, vaga.id)
+      const curriculoUrl = uploaded.url
+      const curriculoNome = uploaded.nome
       const result = await submitPublicApplication({
         vagaId: vaga.id,
         nome: personal.full_name.trim(),
@@ -432,10 +431,10 @@ export function PublicApplyPage() {
                 </Field>
                 <div>
                   <p className="mb-1.5 text-[11.5px] font-bold uppercase tracking-[0.45px] text-[#4A4636]">
-                    Currículo, se quiser
+                    Currículo *
                   </p>
                   <p className="mb-2 text-xs text-[var(--pv-muted)]">
-                    Manda uma foto nítida do papel. Compactamos no envio. PDF e Word não entram porque pesam demais. Não é obrigatório.
+                    Mande uma foto nítida do currículo. Compactamos no envio. PDF e Word não entram porque pesam demais.
                   </p>
                   <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--pv-line-strong)] bg-[#FBF9F3] px-3.5 py-3 text-sm text-[var(--pv-navy)] hover:bg-[#F1EDE0]">
                     <span className="inline-flex min-w-0 items-center gap-2">

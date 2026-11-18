@@ -82,6 +82,9 @@ export async function insertCandidato(input: {
   const cpf = digitsCpf(input.cpf || cpfFromInfo(input.info) || '')
   if (nome.length < 2) throw new Error('Informe o nome completo.')
   if (!isCompleteCpf(cpf)) throw new Error('Informe um CPF válido.')
+  if (!input.curriculoUrl?.trim() || !input.curriculoNome?.trim()) {
+    throw new Error('Anexe o currículo para enviar a candidatura.')
+  }
 
   const { data: already } = await supabase.from('candidatos').select('id').eq('cpf', cpf).maybeSingle()
   if (already) throw new Error('Este CPF já possui uma candidatura. O RH já recebeu seus dados.')
@@ -95,8 +98,8 @@ export async function insertCandidato(input: {
       experiencia: input.experiencia,
       info_complementar: input.info,
       referencia: input.referencia || null,
-      curriculo_url: input.curriculoUrl || null,
-      curriculo_nome: input.curriculoNome || null,
+      curriculo_url: input.curriculoUrl.trim(),
+      curriculo_nome: input.curriculoNome.trim(),
       status: 'pendente',
       criado_em: input.criadoEm,
     })
