@@ -5,7 +5,6 @@ import {
   Briefcase,
   KanbanSquare,
   Users,
-  Archive,
   Sparkles,
   LogOut,
   ExternalLink,
@@ -60,22 +59,26 @@ const STATIC_GROUPS: NavGroup[] = [
 
 const RH_GROUPS: NavGroup[] = [
   {
-    title: 'Pessoas',
+    title: 'Comece aqui',
     items: [
-      { to: '/admin/colaboradores', label: 'Colaboradores', icon: Users },
-      { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/rh', label: 'Início do RH', icon: LayoutDashboard },
     ],
   },
   {
     title: 'Recrutamento',
     items: [
-      { to: '/admin/rh', label: 'Painel de vagas', icon: PieChart },
+      { to: '/admin/candidatos', label: 'Candidaturas', icon: Users },
       { to: '/admin/vagas', label: 'Vagas', icon: Briefcase },
-      { to: '/admin/quadro', label: 'Pipeline', icon: KanbanSquare },
-      { to: '/admin/candidatos', label: 'Candidatos', icon: Users },
-      { to: '/admin/candidatos?status=banco', label: 'Banco de talentos', icon: Archive },
-      { to: '/admin/selecao', label: 'Seleção', icon: Sparkles },
-      { to: '/admin/acesso', label: 'Acesso', icon: KeyRound },
+      { to: '/admin/quadro', label: 'Andamento das vagas', icon: KanbanSquare },
+      { to: '/admin/selecao', label: 'Seleção guiada', icon: Sparkles },
+    ],
+  },
+  {
+    title: 'Pessoas e acesso',
+    items: [
+      { to: '/admin/colaboradores', label: 'Colaboradores', icon: Users },
+      { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/acesso', label: 'Acesso do RH', icon: KeyRound },
     ],
   },
 ]

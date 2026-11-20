@@ -588,12 +588,12 @@ export function AdminCandidatesPage() {
   return (
     <div className="px-5 py-6 sm:px-8">
       <PageHeader
-        eyebrow="Base"
-        title={statusFilter === 'banco' ? 'Banco de talentos' : 'Candidatos'}
+        eyebrow="Recrutamento"
+        title={statusFilter === 'banco' ? 'Banco de talentos' : 'Candidaturas'}
         description={
           statusFilter === 'banco'
             ? 'Pessoas que não foram escolhidas. O cadastro fica aqui para a próxima vaga.'
-            : `${candidatos.length} resultado${candidatos.length === 1 ? '' : 's'} com os filtros atuais`
+            : 'Encontre uma pessoa, abra a candidatura e defina o próximo passo.'
         }
       />
 

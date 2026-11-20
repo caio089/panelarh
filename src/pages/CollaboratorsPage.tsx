@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, FileText, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ArrowLeft, FileText, LogIn, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Field, Input, Modal, PageHeader, Select, Textarea } from '@/components/ui'
 import { ConfirmDialog } from '@/features/gestao/components/ConfirmDialog'
 import { formatDateBR } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 import {
   clearRhHistory,
   createRhCollaborator,
@@ -22,7 +24,6 @@ import {
 
 type FormMode = 'falta' | 'atestado' | 'advertencia' | 'suspensao' | 'documento'
 
-const HOUSES = ['Dirceu', 'Promorar', 'Mocambinho'] as const
 const RECORD_TITLE: Record<FormMode, string> = {
   falta: 'Registrar falta',
   atestado: 'Registrar atestado',
@@ -42,11 +43,9 @@ const HISTORY_LABEL: Record<string, string> = {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-function isHousePerson(person: RhCollaborator) {
-  return HOUSES.includes(person.unit_name as (typeof HOUSES)[number]) && person.full_name.trim().toLowerCase() !== 'caio'
-}
-
 export function CollaboratorsPage() {
+  const { signOut } = useAuth()
+  const navigate = useNavigate()
   const [units, setUnits] = useState<RhUnit[]>([])
   const [collaborators, setCollaborators] = useState<RhCollaborator[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -65,9 +64,9 @@ export function CollaboratorsPage() {
   const [editing, setEditing] = useState<CollaboratorHistoryEvent | null>(null)
   const [deleting, setDeleting] = useState<CollaboratorHistoryEvent | null>(null)
   const [clearing, setClearing] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
 
-  const houseUnits = units.filter((unit) => HOUSES.includes(unit.name as (typeof HOUSES)[number]))
-  const people = useMemo(() => collaborators.filter(isHousePerson), [collaborators])
+  const people = collaborators
   const selected = people.find((person) => person.id === selectedId) ?? null
 
   const visible = people.filter((person) => {
@@ -80,12 +79,16 @@ export function CollaboratorsPage() {
   const reload = useCallback(async () => {
     setLoading(true)
     setPageError('')
+    setSessionExpired(false)
     try {
       const [nextUnits, nextCollaborators] = await Promise.all([listRhUnits(), listRhCollaborators()])
       setUnits(nextUnits || [])
       setCollaborators(nextCollaborators || [])
     } catch (reason) {
-      setPageError(reason instanceof Error ? reason.message : 'Não foi possível carregar os colaboradores.')
+      const message = reason instanceof Error ? reason.message : 'Não foi possível carregar os colaboradores.'
+      const expired = /sessão do rh expirada/i.test(message)
+      setSessionExpired(expired)
+      setPageError(expired ? 'Sua sessão expirou. Entre novamente para carregar os colaboradores.' : message)
     } finally {
       setLoading(false)
     }
@@ -223,7 +226,24 @@ export function CollaboratorsPage() {
         }
       />
 
-      {pageError ? <Alert tone="error" className="mt-5">{pageError}</Alert> : null}
+      {pageError ? (
+        <Alert tone="error" className="mt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>{pageError}</span>
+            {sessionExpired ? (
+              <Button
+                size="sm"
+                variant="navy"
+                onClick={() => {
+                  void signOut().then(() => navigate('/admin/login', { replace: true }))
+                }}
+              >
+                <LogIn size={14} /> Entrar novamente
+              </Button>
+            ) : null}
+          </div>
+        </Alert>
+      ) : null}
       {notice ? <Alert tone="success" className="mt-5">{notice}</Alert> : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
@@ -308,7 +328,7 @@ export function CollaboratorsPage() {
 
       <CreateCollaboratorModal
         open={showCreate}
-        units={houseUnits}
+        units={units}
         saving={saving}
         onClose={() => setShowCreate(false)}
         onSave={async (input) => {
@@ -359,7 +379,7 @@ function PeopleList({
       </label>
       <div className="mt-3 flex flex-wrap gap-1.5">
         <UnitChip active={unitFilter === 'todas'} label={`Todas · ${counts.length}`} onClick={() => onUnit('todas')} />
-        {HOUSES.map((name) => (
+        {[...new Set(counts.map((person) => person.unit_name))].sort((a, b) => a.localeCompare(b, 'pt-BR')).map((name) => (
           <UnitChip
             key={name}
             active={unitFilter === name}
