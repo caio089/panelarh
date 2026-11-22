@@ -1,192 +1,189 @@
-import { getCache } from '@vercel/functions'
-import { getSaiposCompetitionMetrics } from './saiposDirceu.js'
+import { readCompetitionSnapshot, saveCompetitionSnapshot } from './competitionCache.js'
+import { getSaiposCompetitionMetrics, getSaiposCompetitionSales, shiftIsoDate } from './saiposDirceu.js'
 
-const cache = getCache({ namespace: 'panela-velha-competition-days' })
-const memory = new Map()
-const pending = new Map()
+const DAY_TIMEOUT_MS = 90_000
+const FILL_BUDGET_MS = 60_000
+const FILL_METRIC_BATCH_SIZE = 6
+const RETRY_DELAY_MS = 60_000
+const FAILURE_LIMIT = 256
+const pendingDays = new Map()
+const pendingMonths = new Map()
+const retryTimes = new Map()
 
-const CLOSED_DAY_TTL_SECONDS = 60 * 60 * 24
-const OPEN_DAY_TTL_SECONDS = 90
-
-function eachDay(start, end) {
-  const days = []
-  const cursor = new Date(`${start}T12:00:00Z`)
-  const final = new Date(`${end}T12:00:00Z`)
-  while (cursor <= final) {
-    days.push(cursor.toISOString().slice(0, 10))
-    cursor.setUTCDate(cursor.getUTCDate() + 1)
-  }
-  return days
-}
-
-function isSnapshot(value) {
-  return Boolean(value)
-    && typeof value.orders === 'number'
-    && typeof value.seconds === 'number'
-    && typeof value.samples === 'number'
+function dayKey(unitId, day, metric) {
+  return `${unitId}:${day}:${metric}`
 }
 
 function averageMinutes(seconds, samples) {
-  if (!samples) return null
-  return Math.round((seconds / samples / 60) * 10) / 10
+  return samples ? Math.round((seconds / samples / 60) * 10) / 10 : null
 }
 
-function remember(key, snapshot, ttlSeconds) {
-  memory.set(key, { snapshot, expiresAt: Date.now() + ttlSeconds * 1000 })
+function isStale(snapshot, day, today, yesterday, metric, now) {
+  if (!snapshot) return false
+  const age = now - snapshot.fetchedAt
+  if (day === today) return age >= (metric === 'sales' ? 60_000 : 180_000)
+  if (day === yesterday) return age >= 5 * 60_000
+  return age >= 24 * 60 * 60_000
 }
 
-async function readDay(unitId, day) {
-  const key = `${unitId}:${day}`
-  const local = memory.get(key)
-  if (local && local.expiresAt > Date.now() && isSnapshot(local.snapshot)) return local.snapshot
-  try {
-    const value = await cache.get(`v1:${key}`)
-    if (!isSnapshot(value)) return null
-    remember(key, value, OPEN_DAY_TTL_SECONDS)
-    return value
-  } catch {
-    return null
-  }
+function canRetry(unitId, day, metric) {
+  return Date.now() >= (retryTimes.get(dayKey(unitId, day, metric)) ?? 0)
 }
 
-async function writeDay(unitId, day, snapshot, closed) {
-  const key = `${unitId}:${day}`
-  const ttl = closed ? CLOSED_DAY_TTL_SECONDS : OPEN_DAY_TTL_SECONDS
-  remember(key, snapshot, ttl)
-  try {
-    await cache.set(`v1:${key}`, snapshot, {
-      ttl,
-      tags: ['competition-day', unitId],
-      name: 'competition-day',
-    })
-  } catch {
-    // A próxima chamada desta instância ainda encontra o dia na memória.
-  }
-}
-
-async function loadDay({ unitId, day, token, signal, fresh, closed }) {
-  if (!fresh) {
-    const cached = await readDay(unitId, day)
-    if (cached) return cached
-  }
-  const key = `${unitId}:${day}`
-  const current = pending.get(key)
+function refreshDayMetric({ unitId, day, token, metric, freshSales = false, signal }) {
+  const key = dayKey(unitId, day, metric)
+  const current = pendingDays.get(key)
   if (current) return current
 
+  const fetchedAt = Date.now()
+  const sourceSignal = signal ?? AbortSignal.timeout(DAY_TIMEOUT_MS)
   const task = (async () => {
-    const metrics = await getSaiposCompetitionMetrics({
-      start: day,
-      end: day,
-      token,
-      signal,
-      fresh,
-      cacheScope: unitId,
-    })
-    const totals = metrics.dailyKitchenTotals?.[day] || { seconds: 0, samples: 0 }
-    const snapshot = {
-      orders: metrics.counts.get(day) || 0,
-      seconds: totals.seconds,
-      samples: totals.samples,
+    const options = { token, signal: sourceSignal, fresh: true, cacheScope: unitId }
+    let value
+    if (metric === 'sales') {
+      value = await getSaiposCompetitionSales({ ...options, date: day })
+    } else {
+      const metrics = await getSaiposCompetitionMetrics({
+        ...options, start: day, end: day, freshSales,
+      })
+      value = metrics.dailyKitchenTotals[day]
     }
-    await writeDay(unitId, day, snapshot, closed)
+    const snapshot = await saveCompetitionSnapshot(unitId, day, metric, { fetchedAt, value })
+    retryTimes.delete(key)
     return snapshot
-  })().finally(() => pending.delete(key))
+  })().catch((error) => {
+    retryTimes.delete(key)
+    retryTimes.set(key, Date.now() + RETRY_DELAY_MS)
+    if (retryTimes.size > FAILURE_LIMIT) retryTimes.delete(retryTimes.keys().next().value)
+    throw error
+  }).finally(() => pendingDays.delete(key))
 
-  pending.set(key, task)
+  pendingDays.set(key, task)
   return task
 }
 
-function summarize(days, snapshots) {
+export async function loadCompetitionDay({ unitId, day, today, token, kitchenOnly, fresh = false }) {
+  const metric = kitchenOnly ? 'kitchen' : 'sales'
+  const snapshot = await readCompetitionSnapshot(unitId, day, metric)
+  const refresh = () => refreshDayMetric({ unitId, day, token, metric, freshSales: fresh })
+  const stale = isStale(snapshot, day, today, shiftIsoDate(today, -1), metric, Date.now())
+  if (snapshot && !fresh) {
+    return { snapshot, stale, refresh: stale && canRetry(unitId, day, metric) ? refresh : null }
+  }
+  try {
+    return { snapshot: await refresh(), stale: false, refresh: null }
+  } catch (error) {
+    if (!snapshot) throw error
+    return { snapshot, stale: true, refresh: null, error: error instanceof Error ? error.message : 'A Saipos não respondeu.' }
+  }
+}
+
+export function competitionDayPayload(snapshot, kitchenOnly) {
+  return kitchenOnly
+    ? { orders: null, kitchenMinutes: averageMinutes(snapshot.value.seconds, snapshot.value.samples) }
+    : { orders: snapshot.value, kitchenMinutes: null }
+}
+
+export async function loadCompetitionSpan({ unitId, token, start, end, today, kitchenOnly, fresh = false }) {
+  const days = []
+  for (let day = start; day <= end; day = shiftIsoDate(day, 1)) days.push(day)
+  const data = await Promise.all(days.map(async (day) => {
+    const [sales, kitchen] = await Promise.all([
+      readCompetitionSnapshot(unitId, day, 'sales'),
+      readCompetitionSnapshot(unitId, day, 'kitchen'),
+    ])
+    return { day, sales, kitchen }
+  }))
+
+  const now = Date.now()
+  const yesterday = shiftIsoDate(today, -1)
+  const coverage = { totalDays: days.length, salesDays: 0, kitchenDays: 0 }
   let orders = 0
   let seconds = 0
   let samples = 0
-  const series = days.map((day) => {
-    const snapshot = snapshots.get(day)
-    if (!snapshot) return { date: day, orders: 0, kitchenMinutes: null }
-    orders += snapshot.orders
-    seconds += snapshot.seconds
-    samples += snapshot.samples
-    return {
-      date: day,
-      orders: snapshot.orders,
-      kitchenMinutes: averageMinutes(snapshot.seconds, snapshot.samples),
+  let fetchedAt = 0
+  let stale = false
+  const work = { sales: [], kitchen: [] }
+  for (const { day, sales, kitchen } of data) {
+    if (sales) {
+      coverage.salesDays += 1
+      orders += sales.value
+      if (!kitchenOnly) fetchedAt = Math.max(fetchedAt, sales.fetchedAt)
     }
-  })
-  return { orders, kitchenMinutes: averageMinutes(seconds, samples), days: series }
-}
+    if (kitchen) {
+      coverage.kitchenDays += 1
+      seconds += kitchen.value.seconds
+      samples += kitchen.value.samples
+      fetchedAt = Math.max(fetchedAt, kitchen.fetchedAt)
+    }
+    const forceDay = fresh && day >= yesterday
+    const salesStale = isStale(sales, day, today, yesterday, 'sales', now)
+    const kitchenStale = isStale(kitchen, day, today, yesterday, 'kitchen', now)
+    if (!kitchenOnly && (salesStale || (forceDay && sales))) stale = true
+    if (kitchenStale || (forceDay && kitchen)) stale = true
 
-/**
- * A média do mês sai dos dias que já estão em cache, sem esperar o mês inteiro.
- * Só busca a Saipos nesta resposta quando ainda não existe nenhum tempo.
- * Os dias que faltam continuam em segundo plano, do mais recente para o mais antigo.
- */
-export async function loadCompetitionSpan({ unitId, token, start, end, today, signal, fresh = false }) {
-  const days = eachDay(start, end)
-  const snapshots = new Map()
-  const missing = []
-
-  for (const day of days) {
-    const cached = fresh && day === end ? null : await readDay(unitId, day)
-    if (cached) snapshots.set(day, cached)
-    else missing.push(day)
-  }
-
-  const hasAverage = () => [...snapshots.values()].some((snapshot) => snapshot.samples > 0)
-  // Hoje de manhã ainda não tem movimento. O tempo do mês sai do último dia fechado.
-  const inlineDays = [...missing.filter((day) => day < today)].reverse()
-  if (inlineDays.length === 0) inlineDays.push(...[...missing].reverse())
-  let failedDay = ''
-  const nextDay = inlineDays[0]
-  if (!hasAverage() && nextDay) {
-    if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
-    try {
-      const snapshot = await loadDay({
-        unitId,
-        day: nextDay,
-        token,
-        signal,
-        fresh: fresh && nextDay === end,
-        closed: nextDay < today,
-      })
-      snapshots.set(nextDay, snapshot)
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') throw error
-      if (snapshots.size === 0) throw error
-      failedDay = nextDay
+    const loadSales = (!kitchenOnly || !sales) && (forceDay || ((!sales || salesStale) && canRetry(unitId, day, 'sales')))
+    const loadKitchen = forceDay || ((!kitchen || kitchenStale) && canRetry(unitId, day, 'kitchen'))
+    if (loadSales) work.sales.push({ day, forceDay, priority: forceDay ? 0 : sales ? 2 : 1, fetchedAt: sales?.fetchedAt ?? 0 })
+    if (loadKitchen && (sales || loadSales)) {
+      work.kitchen.push({ day, forceDay, priority: forceDay ? 0 : kitchen ? 2 : 1, fetchedAt: kitchen?.fetchedAt ?? 0 })
     }
   }
 
-  const stillMissing = [
-    ...[...days].reverse().filter((day) => day < today && !snapshots.has(day) && day !== failedDay),
-    ...days.filter((day) => day >= today && !snapshots.has(day) && day !== failedDay),
-  ]
-  const partial = days.some((day) => !snapshots.has(day))
-  const totals = summarize(days, snapshots)
-
+  const salesReady = coverage.salesDays === coverage.totalDays
+  const kitchenReady = coverage.kitchenDays === coverage.totalDays
+  const partial = !kitchenReady || (!kitchenOnly && !salesReady)
+  for (const jobs of Object.values(work)) {
+    jobs.sort((a, b) => a.priority - b.priority || a.fetchedAt - b.fetchedAt || b.day.localeCompare(a.day))
+  }
   return {
+    coverage,
     partial,
-    orders: totals.orders,
-    kitchenMinutes: totals.kitchenMinutes,
-    days: totals.days,
-    fill: stillMissing.length === 0
-      ? null
-      : () => fillDays({ unitId, token, today, days: stillMissing }),
+    stale,
+    fetchedAt,
+    orders: salesReady && !kitchenOnly ? orders : null,
+    kitchenMinutes: kitchenReady ? averageMinutes(seconds, samples) : null,
+    days: salesReady && kitchenReady ? data.map(({ day, sales, kitchen }) => ({
+      date: day,
+      orders: sales.value,
+      kitchenMinutes: averageMinutes(kitchen.value.seconds, kitchen.value.samples),
+    })) : null,
+    fill: work.sales.length || work.kitchen.length ? () => fillDays({ unitId, token, work, fresh, now }) : null,
   }
 }
 
-async function fillDays({ unitId, token, today, days }) {
-  for (const day of days) {
-    try {
-      await loadDay({
-        unitId,
-        day,
-        token,
-        signal: undefined,
-        fresh: false,
-        closed: day < today,
-      })
-    } catch {
-      // Um dia lento não pode segurar a média dos outros.
-    }
+function fillDays({ unitId, token, work, fresh, now }) {
+  const current = pendingMonths.get(unitId)
+  if (current) {
+    // Uma atualização manual ainda entra na fila se um lote automático já estiver em andamento.
+    return fresh && !current.fresh
+      ? current.task.then(() => fillDays({ unitId, token, work, fresh, now }))
+      : current.task
   }
+  const signal = AbortSignal.timeout(FILL_BUDGET_MS)
+  const task = (async () => {
+    const failedSales = new Set()
+    const refreshedSales = new Set()
+    // As vendas podem ficar completas mesmo quando a consulta de histórico está indisponível.
+    for (const metric of ['sales', 'kitchen']) {
+      for (const { day, forceDay } of work[metric].slice(0, FILL_METRIC_BATCH_SIZE)) {
+        if (signal.aborted) return
+        if (failedSales.has(day)) continue
+        try {
+          const recent = await readCompetitionSnapshot(unitId, day, metric)
+          if (!recent || recent.fetchedAt <= now) {
+            const freshSales = metric === 'kitchen' && forceDay && !refreshedSales.has(day)
+            await refreshDayMetric({ unitId, token, day, metric, freshSales, signal })
+          }
+          if (metric === 'sales') refreshedSales.add(day)
+        } catch {
+          // O histórico depende das vendas deste dia. Os demais dias podem continuar.
+          if (metric === 'sales') failedSales.add(day)
+        }
+      }
+    }
+  })().finally(() => pendingMonths.delete(unitId))
+
+  pendingMonths.set(unitId, { fresh, task })
+  return task
 }

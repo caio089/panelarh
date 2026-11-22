@@ -10,6 +10,9 @@ const MAX_PAGES = 2
 const ATTEMPTS = 2
 const REQUEST_TIMEOUT_MS = 18000
 const MAX_IN_FLIGHT = 2
+const COMPETITION_PAGE_LIMIT = 100
+const COMPETITION_CACHE_TTL_MS = 30_000
+const COMPETITION_CACHE_LIMIT = 90
 
 /** No máximo duas consultas no total: a API de dados da Saipos limita o pool compartilhado. */
 let inFlight = 0
@@ -99,11 +102,11 @@ function normalizeToken(token) {
   return trimmed.toLowerCase().startsWith('bearer ') ? trimmed : `Bearer ${trimmed}`
 }
 
-function asRows(body) {
+function asRows(body, fallback = []) {
   if (Array.isArray(body)) return body
   if (body && Array.isArray(body.data)) return body.data
   if (body && Array.isArray(body.result)) return body.result
-  return []
+  return fallback
 }
 
 function retryable(error) {
@@ -129,7 +132,7 @@ function fetchWithDeadline(url, token, signal) {
   const request = fetch(url, {
     headers: { Authorization: normalizeToken(token), Accept: 'application/json' },
     signal: controller.signal,
-  })
+  }).then(async (response) => ({ response, raw: await response.text() }))
   request.catch(() => undefined)
   return Promise.race([request, deadline]).finally(() => {
     clearTimeout(timer)
@@ -148,8 +151,7 @@ async function saiposGet(path, params, token, signal) {
       if (attempt > 0) await sleep(600)
       if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
       try {
-        const response = await fetchWithDeadline(url, token, signal)
-        const raw = await response.text()
+        const { response, raw } = await fetchWithDeadline(url, token, signal)
         if (response.status === 504 || response.status === 503 || response.status === 429) {
           lastMessage = 'A Saipos está ocupada agora.'
           continue
@@ -160,7 +162,7 @@ async function saiposGet(path, params, token, signal) {
         if (!response.ok) {
           throw new Error(`A Saipos recusou a consulta (${response.status}).`)
         }
-        return raw ? JSON.parse(raw) : []
+        return raw ? JSON.parse(raw) : null
       } catch (error) {
         if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
           throw new DOMException('Consulta cancelada.', 'AbortError')
@@ -751,6 +753,116 @@ const CATEGORIES = {
   financeiro: { path: '/search_financial_transactions', filter: 'date', summarize: (rows) => summarizeFinance(rows) },
 }
 
+const competitionSources = new Map()
+const pendingCompetitionSources = new Map()
+
+async function loadCompetitionRows(spec, date, token, signal) {
+  const pageSize = spec.pageSize ?? PAGE_SIZE
+  const params = { p_date_column_filter: spec.filter, ...dayRange(date) }
+  const rows = []
+  const seenIds = new Set()
+  for (let page = 0; page < COMPETITION_PAGE_LIMIT; page += 1) {
+    const batch = asRows(await saiposGet(spec.path, {
+      ...params, p_limit: pageSize, p_offset: page * pageSize,
+    }, token, signal), null)
+    if (!batch || batch.length > pageSize || batch.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) {
+      throw new Error('A Saipos devolveu uma página inválida para a competição.')
+    }
+    if (batch.length === 0) return rows
+    const ids = batch.map((row) => saleKey(row.id_sale))
+    if (batch.length === pageSize && ids.every((id) => id && seenIds.has(id))) {
+      throw new Error('A Saipos repetiu uma página da competição.')
+    }
+    for (const id of ids) if (id) seenIds.add(id)
+    rows.push(...batch)
+    if (batch.length < pageSize) return rows
+  }
+  throw new Error('A consulta da competição não conseguiu carregar todas as páginas da Saipos.')
+}
+
+function subscribeToCompetitionSource(read, signal) {
+  read.subscribers += 1
+  let onAbort
+  const result = signal
+    ? new Promise((resolve, reject) => {
+      onAbort = () => reject(new DOMException('Consulta cancelada.', 'AbortError'))
+      signal.addEventListener('abort', onAbort, { once: true })
+      read.promise.then(resolve, reject)
+    })
+    : read.promise
+  return result.finally(() => {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+    read.subscribers -= 1
+    if (read.subscribers === 0 && !read.finished) read.controller.abort()
+  })
+}
+
+async function loadCompetitionSource(spec, summarize, { date, token, signal, fresh, cacheScope }) {
+  if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
+  const key = `${cacheScope}:${spec.path}:${date}`
+  const cached = competitionSources.get(key)
+  if (!fresh && cached?.expiresAt > Date.now()) return cached.value
+
+  const pending = pendingCompetitionSources.get(key)
+  if (pending && !pending.controller.signal.aborted) return subscribeToCompetitionSource(pending, signal)
+
+  const controller = new AbortController()
+  const read = { controller, subscribers: 0, finished: false }
+  read.promise = loadCompetitionRows(spec, date, token, controller.signal)
+    .then((rows) => {
+      const value = summarize(rows)
+      if (!controller.signal.aborted) {
+        competitionSources.delete(key)
+        competitionSources.set(key, { value, expiresAt: Date.now() + COMPETITION_CACHE_TTL_MS })
+        if (competitionSources.size > COMPETITION_CACHE_LIMIT) competitionSources.delete(competitionSources.keys().next().value)
+      }
+      return value
+    })
+    .finally(() => {
+      read.finished = true
+      if (pendingCompetitionSources.get(key) === read) pendingCompetitionSources.delete(key)
+    })
+  pendingCompetitionSources.set(key, read)
+  return subscribeToCompetitionSource(read, signal)
+}
+
+function latestCompetitionRows(rows) {
+  const byId = new Map()
+  const unkeyed = []
+  for (const row of rows) {
+    const id = saleKey(row.id_sale)
+    if (!id) {
+      unkeyed.push(row)
+      continue
+    }
+    const previous = byId.get(id)
+    if (!previous || (Date.parse(row.updated_at) || 0) >= (Date.parse(previous.updated_at) || 0)) byId.set(id, row)
+  }
+  return { byId, unkeyed }
+}
+
+function summarizeCompetitionSales(rows) {
+  const { byId, unkeyed } = latestCompetitionRows(rows)
+  const ids = new Set()
+  let count = unkeyed.filter(isCompetitionSale).length
+  for (const [id, row] of byId) {
+    if (!isCompetitionSale(row)) continue
+    count += 1
+    ids.add(id)
+  }
+  return { count, ids }
+}
+
+function summarizeCompetitionHistories(rows) {
+  const { byId } = latestCompetitionRows(rows)
+  const durations = new Map()
+  for (const [id, row] of byId) {
+    const seconds = competitionKitchenSeconds(row)
+    if (seconds !== null) durations.set(id, seconds)
+  }
+  return durations
+}
+
 async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 'dirceu') {
   const key = `${cacheScope}:${spec.path}:${spec.filter}:${day}`
   if (!fresh && rawCache.has(key)) return rawCache.get(key)
@@ -943,60 +1055,58 @@ export async function getSaiposKdsOrderDetails({ date, token, signal, fresh = fa
   }))
 }
 
+export async function getSaiposCompetitionSales({ date, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+  if (!isIsoDate(date)) throw new Error('Informe o dia no formato AAAA-MM-DD.')
+  if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
+  const sales = await loadCompetitionSource(CATEGORIES.faturamento, summarizeCompetitionSales, { date, token, signal, fresh, cacheScope })
+  return sales.count
+}
+
+function averageCompetitionMinutes(seconds, samples) {
+  return samples ? Math.round((seconds / samples / 60) * 10) / 10 : null
+}
+
 /**
- * Vendas e tempo da competição no mesmo recorte: entrega e salão, sem canceladas.
- * O histórico de status não traz o tipo da venda, então o tempo só entra se o
- * id_sale existir numa venda de mesa ou delivery. Cada venda pesa uma vez.
- * A consulta é por dia porque a Saipos recusa um intervalo maior que 15 dias.
+ * A venda define o canal e o cancelamento. O histórico define a duração.
+ * O cruzamento por id_sale dá o mesmo peso a cada venda elegível com tempo.
  */
-export async function getSaiposCompetitionMetrics({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
+export async function getSaiposCompetitionMetrics({ start, end, token, signal, fresh = false, freshSales = fresh, cacheScope = 'dirceu' }) {
   if (!isIsoDate(start) || !isIsoDate(end) || start > end) throw new Error('Informe um intervalo de datas válido.')
   if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
-
-  const days = eachDay(start, end)
-  const loaded = []
-  for (const day of days) {
-    if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError')
-    const refreshDay = fresh && day === end
-    const sales = await loadOneDay(CATEGORIES.faturamento, day, token, signal, refreshDay, cacheScope)
-    const histories = await loadOneDay(CATEGORIES.cozinha, day, token, signal, refreshDay, cacheScope)
-    loaded.push({ day, sales, histories })
-  }
 
   const counts = new Map()
   const dailyKitchenMinutes = {}
   const dailyKitchenTotals = {}
-  const allSeconds = []
-  for (const { day, sales, histories } of loaded) {
-    const allowed = new Set()
-    let count = 0
-    for (const row of sales) {
-      if (!isCompetitionSale(row)) continue
-      count += 1
-      const key = saleKey(row.id_sale)
-      if (key) allowed.add(key)
+  let totalSeconds = 0
+  let totalSamples = 0
+  for (const date of eachDay(start, end)) {
+    const options = { date, token, signal, cacheScope }
+    const sales = await loadCompetitionSource(CATEGORIES.faturamento, summarizeCompetitionSales, {
+      ...options, fresh: freshSales && date === end,
+    })
+    let seconds = 0
+    let samples = 0
+    if (sales.ids.size > 0) {
+      const durations = await loadCompetitionSource(CATEGORIES.cozinha, summarizeCompetitionHistories, {
+        ...options, fresh: fresh && date === end,
+      })
+      for (const id of sales.ids) {
+        const duration = durations.get(id)
+        if (duration === undefined) continue
+        seconds += duration
+        samples += 1
+      }
     }
-    counts.set(day, count)
-
-    const daySeconds = []
-    for (const row of histories) {
-      if (!allowed.has(saleKey(row.id_sale))) continue
-      const seconds = competitionKitchenSeconds(row)
-      if (seconds === null) continue
-      daySeconds.push(seconds)
-      allSeconds.push(seconds)
-    }
-    const average = durationStats(daySeconds).averageMinutes
-    if (typeof average === 'number') dailyKitchenMinutes[day] = average
-    dailyKitchenTotals[day] = {
-      seconds: daySeconds.reduce((sum, value) => sum + value, 0),
-      samples: daySeconds.length,
-    }
+    counts.set(date, sales.count)
+    dailyKitchenTotals[date] = { seconds, samples }
+    if (samples > 0) dailyKitchenMinutes[date] = averageCompetitionMinutes(seconds, samples)
+    totalSeconds += seconds
+    totalSamples += samples
   }
 
   return {
     counts,
-    averageMinutes: durationStats(allSeconds).averageMinutes,
+    averageMinutes: averageCompetitionMinutes(totalSeconds, totalSamples),
     dailyKitchenMinutes,
     dailyKitchenTotals,
   }

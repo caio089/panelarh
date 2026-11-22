@@ -1,29 +1,60 @@
 import { getCache } from '@vercel/functions'
 
-const cache = getCache({ namespace: 'panela-velha-competition' })
+const cache = getCache({ namespace: 'panela-velha-competition-days' })
+const CACHE_VERSION = 'v2'
+const RETENTION_SECONDS = 35 * 24 * 60 * 60
+const LOCAL_READ_TTL_MS = 5_000
+const LOCAL_LIMIT = 256
+const local = new Map()
 
-function key(period, date, metric, unitId) {
-  return `${metric}:${period}:${date}:${unitId}`
+function key(unitId, day, metric) {
+  return `${CACHE_VERSION}:${unitId}:${day}:${metric}`
 }
 
-export async function readCompetitionCache(period, date, metric, unitId) {
+function isSnapshot(snapshot, metric) {
+  if (!Number.isFinite(snapshot?.fetchedAt)) return false
+  if (metric === 'sales') return Number.isInteger(snapshot.value) && snapshot.value >= 0
+  const { seconds, samples } = snapshot.value ?? {}
+  return Number.isFinite(seconds) && seconds >= 0 && Number.isInteger(samples) && samples >= 0
+}
+
+function remember(id, snapshot) {
+  local.delete(id)
+  local.set(id, { snapshot, checkedAt: Date.now() })
+  if (local.size > LOCAL_LIMIT) local.delete(local.keys().next().value)
+  return snapshot
+}
+
+export async function readCompetitionSnapshot(unitId, day, metric, checkRegion = false) {
+  const id = key(unitId, day, metric)
+  const entry = local.get(id)
+  if (!checkRegion && entry && Date.now() - entry.checkedAt < LOCAL_READ_TTL_MS) return entry.snapshot
+  let regional
   try {
-    const value = await cache.get(key(period, date, metric, unitId))
-    return value && typeof value === 'object' ? value : null
+    regional = await cache.get(id)
   } catch {
-    return null
+    // Uma falha no cache regional ainda permite aproveitar a leitura desta instância.
   }
+  const fallback = local.get(id)?.snapshot ?? entry?.snapshot
+  if (isSnapshot(regional, metric) && (!fallback || regional.fetchedAt > fallback.fetchedAt)) return remember(id, regional)
+  if (fallback && Date.now() - fallback.fetchedAt < RETENTION_SECONDS * 1000) return remember(id, fallback)
+  return remember(id, null)
 }
 
-export async function saveCompetitionCache(period, date, metric, unitId, payload) {
-  const maxAge = metric.startsWith('ranking-') || period === 'mes' ? 60 * 10 : 60 * 2
+export async function saveCompetitionSnapshot(unitId, day, metric, snapshot) {
+  if (!isSnapshot(snapshot, metric)) throw new Error('A Saipos devolveu métricas inválidas para este turno.')
+  const id = key(unitId, day, metric)
+  const current = await readCompetitionSnapshot(unitId, day, metric, true)
+  if (current && current.fetchedAt > snapshot.fetchedAt) return current
+  remember(id, snapshot)
   try {
-    await cache.set(key(period, date, metric, unitId), payload, {
-      ttl: maxAge,
-      tags: ['competition', unitId],
-      name: 'competition-scoreboard',
+    await cache.set(id, snapshot, {
+      ttl: RETENTION_SECONDS,
+      tags: ['competition-day', unitId],
+      name: 'competition-day',
     })
   } catch {
-    // A tela ainda usa a resposta da Saipos se o cache estiver indisponível.
+    // A resposta continua disponível nesta instância.
   }
+  return snapshot
 }

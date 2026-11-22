@@ -14,3 +14,23 @@ export function pipeDirceuReport(
   },
   fresh?: boolean,
 ): Promise<void>
+
+type CompetitionSourceOptions = {
+  token: string
+  signal?: AbortSignal
+  fresh?: boolean
+  cacheScope?: string
+}
+
+export function getSaiposCompetitionSales(options: CompetitionSourceOptions & { date: string }): Promise<number>
+
+export function getSaiposCompetitionMetrics(options: CompetitionSourceOptions & {
+  start: string
+  end: string
+  freshSales?: boolean
+}): Promise<{
+  counts: Map<string, number>
+  averageMinutes: number | null
+  dailyKitchenMinutes: Record<string, number>
+  dailyKitchenTotals: Record<string, { seconds: number; samples: number }>
+}>
