@@ -28,9 +28,9 @@ function mockSaipos(t, rowsFor, now = '2026-11-02T23:00:00Z') {
     const start = query.get('p_filter_date_start').slice(0, 10)
     const end = query.get('p_filter_date_end').slice(0, 10)
     assert.equal(start, end)
-    const rows = rowsFor(url.pathname, start)
-    if (rows instanceof Response) return rows
     const offset = Number(query.get('p_offset'))
+    const rows = rowsFor(url.pathname, start, offset)
+    if (rows instanceof Response) return rows
     const limit = Number(query.get('p_limit'))
     return Response.json(rows.slice(offset, offset + limit))
   })
@@ -117,6 +117,55 @@ test('uma página repetida da Saipos falha sem publicar uma contagem truncada', 
   assert.equal(result.status, 503)
   assert.match(result.body.error, /repetiu uma página/)
   assert.equal(result.body.unit, undefined)
+})
+
+test('uma resposta de erro em HTTP 200 não vira um dia com zero vendas', async (t) => {
+  mockSaipos(t, () => Response.json({ error: 'Consulta indisponível' }))
+  const result = await request({ unidade: 'dirceu', dia: '2026-10-30', periodo: 'dia' })
+  assert.equal(result.status, 503)
+  assert.match(result.body.error, /página inválida/)
+  assert.equal(result.body.unit, undefined)
+})
+
+test('o null de vendas encerra a paginação e completa o mês com o dia sem movimento', async (t) => {
+  const sales = Array.from({ length: 300 }, (_, index) => sale(index + 1))
+  const seen = []
+  const { finishBackground } = mockSaipos(t, (path, date, offset) => {
+    if (!path.endsWith('/search_sales')) return [kitchenHistory(1, 600)]
+    seen.push([date, offset])
+    if (date.endsWith('-02') || offset === 300) return Response.json(null)
+    return sales
+  }, '2026-12-02T15:00:00Z')
+
+  const current = await request({ unidade: 'promorar', dia: '2026-12-02' })
+  assert.equal(current.status, 200)
+  assert.equal(current.body.unit.orders, 0)
+  const query = { unidade: 'promorar', periodo: 'mes', modo: 'diario' }
+  await request(query)
+  await finishBackground()
+  const ranking = await request(query)
+  assert.equal(ranking.status, 200)
+  assert.equal(ranking.body.partial, false)
+  assert.deepEqual(ranking.body.coverage, { totalDays: 2, salesDays: 2, kitchenDays: 2 })
+  assert.deepEqual(ranking.body.days, [
+    { date: '2026-12-01', orders: 300, kitchenMinutes: 10 },
+    { date: '2026-12-02', orders: 0, kitchenMinutes: null },
+  ])
+  assert.ok(seen.some(([date, offset]) => date === '2026-12-01' && offset === 300))
+})
+
+test('um corpo ausente em vendas e null no histórico continuam sendo erros', async (t) => {
+  mockSaipos(t, (path, date) => {
+    if (date.endsWith('-29')) return new Response(null, { status: 200 })
+    return path.endsWith('/search_sales') ? [sale(1)] : Response.json(null)
+  })
+  const emptyBody = await request({ unidade: 'dirceu', dia: '2026-10-29' })
+  const invalidHistory = await request({ unidade: 'dirceu', dia: '2026-10-28', dados: 'cozinha' })
+  for (const result of [emptyBody, invalidHistory]) {
+    assert.equal(result.status, 503)
+    assert.match(result.body.error, /página inválida/)
+    assert.equal(result.body.unit, undefined)
+  }
 })
 
 test('o mensal mantém vendas completas disponíveis e espera pelos dias de cozinha para publicar a média', async (t) => {

@@ -158,6 +158,8 @@ async function saiposGet(path, params, token, signal) {
         if (!response.ok) {
           throw new Error(`A Saipos recusou a consulta (${response.status}).`)
         }
+        // /search_sales responde com o JSON null quando o intervalo ou a próxima página não tem vendas.
+        if (path === '/search_sales' && response.status === 200 && raw.trim() === 'null') return []
         return raw ? JSON.parse(raw) : null
       } catch (error) {
         if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
