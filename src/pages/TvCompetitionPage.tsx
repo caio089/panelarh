@@ -1,7 +1,8 @@
 import { AlertTriangle, CalendarDays, CalendarRange, Clock3, RefreshCw, Store, Trophy } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
-import { COMPETITION_UNIT_IDS, fetchCompetitionUnit, loadCompetitionUnits, type CompetitionDayPoint, type CompetitionFields, type CompetitionPeriod, type CompetitionUnitMetric } from '@/features/dirceu/competitionClient'
+import { COMPETITION_UNIT_IDS, fetchCompetitionUnit, type CompetitionDayPoint, type CompetitionFields, type CompetitionPeriod, type CompetitionUnitMetric } from '@/features/dirceu/competitionClient'
+import { usePageVisible } from '@/features/dirceu/usePageVisible'
 import { competitionDayInFortaleza, isIsoDate, todayInFortaleza } from '@/features/dirceu/day'
 
 type UnitScore = {
@@ -89,14 +90,17 @@ const HISTORICAL_REFRESH_MS = 5 * REFRESH_MS
 const KDS_REFRESH_MS = 30 * 1000
 const KDS_RETRY_MS = 2 * 60 * 1000
 const AUTO_SLIDE_MS = 60 * 1000
-const COMPETITION_RETRY_MS = 20 * 1000
+const MONTH_REFRESH_MS = 10 * REFRESH_MS
 
 function useCompetitionDates() {
   const [now, setNow] = useState(() => new Date())
+  const visible = usePageVisible()
   useEffect(() => {
+    if (!visible) return
+    setNow(new Date())
     const timer = window.setInterval(() => setNow(new Date()), REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [visible])
   return { today: todayInFortaleza(now), currentCompetitionDay: competitionDayInFortaleza(now) }
 }
 
@@ -120,12 +124,12 @@ function boardSnapshot(board: CompetitionBoard, period: CompetitionPeriod, date:
   return snapshot?.date === date ? snapshot : { date, units: EMPTY_UNITS }
 }
 
-function mergeCompetitionUnit(snapshot: CompetitionSnapshot, unit: CompetitionUnitMetric, fields: CompetitionFields, fetchedAt?: string, stale = false) {
+function mergeCompetitionUnit(snapshot: CompetitionSnapshot, unit: CompetitionUnitMetric, fields: CompetitionFields, fetchedAt?: string) {
   let changed = false
   const units = snapshot.units.map((existing) => {
     if (existing.name !== TV_UNITS[unit.id]) return existing
-    const orders = fields.orders && (!stale || !existing.ready.orders)
-    const kitchen = fields.kitchen && (!stale || !existing.ready.kitchen)
+    const orders = fields.orders
+    const kitchen = fields.kitchen
     changed = orders || kitchen
     if (!changed) return existing
     return {
@@ -176,13 +180,147 @@ function standingsFromDays(series: Array<{ name: string; days: CompetitionDayPoi
   return [...totals.values()].sort((a, b) => b.total - a.total || b.salesPoints - a.salesPoints || a.name.localeCompare(b.name))
 }
 
+type Reading = {
+  next: number
+  failures: number
+  refreshId?: number
+  fetchedAt: number
+  status: CompetitionStatus
+  days?: CompetitionDayPoint[]
+}
+const PENDING_STATUS: CompetitionStatus = { pending: true, stale: false, error: '' }
+
+/** Uma fila por tela. A troca visual entre dia e mês não altera a agenda de cada métrica/unidade. */
+function useCompetitionBoard({
+  today, day, currentDay, origin, showDay, showMonth, refresh,
+}: {
+  today: string
+  day: string
+  currentDay: string
+  origin?: string | null
+  showDay: boolean
+  showMonth: boolean
+  refresh?: { period: CompetitionPeriod; id: number }
+}) {
+  const visible = usePageVisible()
+  const [board, setBoard] = useState<CompetitionBoard>({})
+  const [ranking, setRanking] = useState<{ date: string; scores: CompetitionScore[] }>()
+  const [finishedRefresh, setFinishedRefresh] = useState(0)
+  const readings = useRef(new Map<string, Reading>())
+  const appliedRefresh = useRef(0)
+
+  useEffect(() => {
+    if (!visible) return
+    const controller = new AbortController()
+    const signal = controller.signal
+    const units = origin && Object.hasOwn(TV_UNITS, origin)
+      ? [origin, ...COMPETITION_UNIT_IDS.filter((id) => id !== origin)] : COMPETITION_UNIT_IDS
+    const metrics = [
+      ...(showDay ? ['sales', 'kitchen'] as const : []),
+      ...(showMonth ? ['month'] as const : []),
+    ]
+    const jobs = metrics.flatMap((metric) => {
+      const period: CompetitionPeriod = metric === 'month' ? 'mes' : 'dia'
+      const date = period === 'mes' ? today : day
+      const cadence = metric === 'month' ? MONTH_REFRESH_MS
+        : day < currentDay ? HISTORICAL_REFRESH_MS : metric === 'kitchen' ? 3 * REFRESH_MS : REFRESH_MS
+      return units.map((unitId) => ({ metric, period, date, cadence, unitId, key: [metric, date, unitId].join(':') }))
+    })
+    // Mantém a agenda ao mudar de aba ou voltar do segundo plano, sem reter datas antigas.
+    for (const key of readings.current.keys()) {
+      const [metric, date] = key.split(':')
+      if (date !== (metric === 'month' ? today : day)) readings.current.delete(key)
+    }
+
+    function update(period: CompetitionPeriod, date: string, apply: (value: CompetitionSnapshot) => CompetitionSnapshot) {
+      if (!signal.aborted) setBoard((previous) => ({ ...previous, [period]: apply(boardSnapshot(previous, period, date)) }))
+    }
+
+    function publishStatus(period: CompetitionPeriod, date: string) {
+      const selected = jobs.filter((job) => job.period === period)
+      const list = selected.map((job) => readings.current.get(job.key))
+      const statuses = list.map((item) => item?.status ?? PENDING_STATUS)
+      const status = {
+        pending: statuses.some((value) => value.pending),
+        stale: statuses.some((value) => value.stale),
+        error: statuses.find((value) => value.error)?.error ?? '',
+      }
+      update(period, date, (value) => ({ ...value, status }))
+      if (period === 'mes' && list.every((item) => item?.days)) {
+        const series = selected.map((job, index) => ({ name: TV_UNITS[job.unitId], days: list[index]!.days! }))
+        setRanking({ date, scores: standingsFromDays(series) })
+      }
+    }
+
+    let timer: number
+    async function run() {
+      const manual = refresh && appliedRefresh.current !== refresh.id
+      for (const job of jobs) {
+        if (signal.aborted) return
+        const previous = readings.current.get(job.key)
+        const fresh = Boolean(manual && refresh?.period === job.period && previous?.refreshId !== refresh.id)
+        if (!fresh && previous && previous.next > Date.now()) continue
+        let status: CompetitionStatus
+        let days = previous?.days
+        let fetchedAt = previous?.fetchedAt ?? 0
+        try {
+          const payload = await fetchCompetitionUnit({
+            unitId: job.unitId, date: job.date, period: job.period,
+            kitchen: job.metric === 'kitchen', daily: job.metric === 'month', fresh, signal,
+          })
+          if (signal.aborted) return
+          const { unit, fields } = payload
+          const complete = job.metric === 'sales' ? fields.orders : job.metric === 'kitchen' ? fields.kitchen : fields.orders && fields.kitchen
+          let error = payload.error || ''
+          const sourceTime = Date.parse(payload.fetchedAt ?? '') || 0
+          const current = sourceTime >= fetchedAt
+          if (job.metric === 'month' && complete && current) {
+            const valid = payload.days?.length === Number(today.slice(-2)) && payload.days.every(
+              (point, index) => point.date === today.slice(0, 8) + String(index + 1).padStart(2, '0'),
+            )
+            if (valid) days = payload.days
+            else error ||= 'A série de dias do ranking veio incompleta.'
+          }
+          status = { pending: Boolean(payload.partial) || !complete, stale: Boolean(payload.stale), error }
+          if (current && (fields.orders || fields.kitchen)) {
+            fetchedAt = sourceTime
+            update(job.period, job.date, (value) => mergeCompetitionUnit(value, unit, fields, payload.fetchedAt))
+          }
+        } catch (reason) {
+          if (signal.aborted) return
+          status = { pending: false, stale: false, error: reason instanceof Error ? reason.message : 'Consulta indisponível.' }
+        }
+        const failures = status.pending || status.error ? (previous?.failures ?? 0) + 1 : 0
+        const normalDelay = fresh && status.stale ? REFRESH_MS : job.cadence
+        const delay = failures ? Math.min(MONTH_REFRESH_MS, REFRESH_MS * 2 ** Math.min(4, failures - 1)) : normalDelay
+        readings.current.set(job.key, {
+          next: Date.now() + delay, failures, fetchedAt, status, days,
+          refreshId: fresh ? refresh?.id : previous?.refreshId,
+        })
+        publishStatus(job.period, job.date)
+      }
+      if (signal.aborted) return
+      if (manual && refresh) {
+        appliedRefresh.current = refresh.id
+        setFinishedRefresh(refresh.id)
+      }
+      const next = Math.min(...jobs.map((job) => readings.current.get(job.key)!.next))
+      timer = window.setTimeout(run, Math.max(0, next - Date.now()))
+    }
+    timer = window.setTimeout(run, 0)
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [currentDay, day, origin, refresh, showDay, showMonth, today, visible])
+
+  return { board, ranking, refreshing: Boolean(refresh && refresh.id !== finishedRefresh) }
+}
+
 export function TvCompetitionPage() {
   const { unit: requestedUnit } = useParams()
   const { pathname } = useLocation()
   const routeUnit = requestedUnit || pathname.split('/').filter(Boolean).at(-1) || ''
   const tvUnitId = unitSlug(routeUnit)
 
-  if (tvUnitId) return <TvUnitDashboard unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} />
+  if (tvUnitId) return <TvUnitDashboard key={tvUnitId} unitId={tvUnitId} unitName={TV_UNITS[tvUnitId]} />
   return <CompetitionDashboard />
 }
 
@@ -199,23 +337,17 @@ function CompetitionDashboard() {
   // O placar mensal sempre representa o mês calendário atual; somente o
   // placar diário pode consultar uma data anterior.
   const date = period === 'mes' ? today : selectedDate
-  const [board, setBoard] = useState<CompetitionBoard>({})
-  const [monthlyRanking, setMonthlyRanking] = useState<{ date: string; scores: CompetitionScore[] }>()
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [refreshing, setRefreshing] = useState(false)
-  const appliedRefresh = useRef(0)
+  const visible = usePageVisible()
+  const [refresh, setRefresh] = useState<{ period: CompetitionPeriod; id: number }>()
+  const { board, ranking: monthlyRanking, refreshing } = useCompetitionBoard({
+    today, day: selectedDate, currentDay: currentCompetitionDay, origin: originUnit,
+    showDay: view === 'placar' || period === 'dia', showMonth: view === 'placar' || period === 'mes', refresh,
+  })
   const snapshot = boardSnapshot(board, period, date)
   const units = snapshot.units
   const hasMonthlyData = boardSnapshot(board, 'mes', today).units.some((unit) => unit.ready.orders || unit.ready.kitchen)
-  const unitOrder = useMemo(
-    () => (originUnit && TV_UNITS[originUnit]
-      ? [originUnit, ...COMPETITION_UNIT_IDS.filter((id) => id !== originUnit)]
-      : [...COMPETITION_UNIT_IDS]),
-    [originUnit],
-  )
-
   useEffect(() => {
-    if (view !== 'placar' || refreshing) return
+    if (!visible || view !== 'placar' || refreshing) return
     const interval = window.setInterval(() => {
       setParams((current) => {
         const updated = new URLSearchParams(current)
@@ -226,118 +358,7 @@ function CompetitionDashboard() {
       }, { replace: true })
     }, AUTO_SLIDE_MS)
     return () => window.clearInterval(interval)
-  }, [setParams, hasMonthlyData, refreshing, view])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const filled = new Set<CompetitionPeriod>()
-    let timer: number | undefined
-    let lastKitchen = 0
-    let dailyKitchenStatus: CompetitionStatus = { pending: true, error: '', stale: false }
-    const dateFor = (selected: CompetitionPeriod) => selected === 'mes' ? today : selectedDate
-
-    function update(selected: CompetitionPeriod, apply: (snapshot: CompetitionSnapshot) => CompetitionSnapshot) {
-      if (controller.signal.aborted) return
-      setBoard((current) => ({
-        ...current,
-        [selected]: apply(boardSnapshot(current, selected, dateFor(selected))),
-      }))
-    }
-
-    const loadPeriod = async (selected: CompetitionPeriod, fresh: boolean) => {
-      const load = (kitchen: boolean) => loadCompetitionUnits({
-        unitIds: unitOrder,
-        date: dateFor(selected),
-        period: selected,
-        kitchen,
-        fresh,
-        signal: controller.signal,
-        onUnit: (unit, fields, fetchedAt, stale) => update(selected, (current) => mergeCompetitionUnit(current, unit, fields, fetchedAt, stale)),
-      })
-      const sales = await load(false)
-      if (selected === 'mes' || controller.signal.aborted) return sales
-      if (fresh || Date.now() - lastKitchen >= 3 * REFRESH_MS || dailyKitchenStatus.stale || dailyKitchenStatus.error) {
-        dailyKitchenStatus = await load(true)
-        lastKitchen = Date.now()
-      }
-      return {
-        pending: sales.pending || dailyKitchenStatus.pending,
-        stale: sales.stale || dailyKitchenStatus.stale,
-        error: sales.error || dailyKitchenStatus.error,
-      }
-    }
-
-    const loadRanking = async (fresh: boolean): Promise<CompetitionStatus> => {
-      let pending = false
-      let stale = false
-      let error = ''
-      const series: Array<{ name: string; days: CompetitionDayPoint[] }> = []
-      for (const unitId of unitOrder) {
-        if (controller.signal.aborted) return { pending, stale, error }
-        try {
-          const payload = await fetchCompetitionUnit({ unitId, date: today, period: 'mes', daily: true, fresh, signal: controller.signal })
-          const { unit, fields, days } = payload
-          stale ||= Boolean(payload.stale)
-          if (fields.orders || fields.kitchen) update('mes', (current) => mergeCompetitionUnit(current, unit, fields, payload.fetchedAt, payload.stale))
-          if (payload.partial || !days) {
-            pending = true
-            continue
-          }
-          const sameMonth = days.length === Number(today.slice(-2)) && days.every(
-            (day, index) => day.date === today.slice(0, 8) + String(index + 1).padStart(2, '0'),
-          )
-          if (!sameMonth || !fields.orders || !fields.kitchen) {
-            error ||= 'A série de dias do ranking veio incompleta.'
-            continue
-          }
-          series.push({ name: unit.name, days })
-        } catch (reason) {
-          error ||= reason instanceof Error ? reason.message : 'Não foi possível atualizar a classificação.'
-        }
-      }
-      if (!controller.signal.aborted && series.length === unitOrder.length) {
-        setMonthlyRanking((current) => stale && current?.date === today
-          ? current
-          : { date: today, scores: standingsFromDays(series) })
-      }
-      return { pending, stale, error }
-    }
-
-    const run = async () => {
-      if (controller.signal.aborted) return
-      const fresh = refreshKey !== appliedRefresh.current
-      appliedRefresh.current = refreshKey
-      let status: CompetitionStatus
-      try {
-        status = view === 'ranking' && period === 'mes' ? await loadRanking(fresh) : await loadPeriod(period, fresh)
-      } finally {
-        if (fresh) setRefreshing(false)
-      }
-      update(period, (current) => ({ ...current, status }))
-      if (controller.signal.aborted) return
-      let shouldRetry = status.pending || status.stale || Boolean(status.error)
-      if (view === 'placar') {
-        const other = period === 'dia' ? 'mes' : 'dia'
-        if (!filled.has(other)) {
-          const extra = await loadPeriod(other, false)
-          update(other, (current) => ({ ...current, status: extra }))
-          const retryOther = extra.pending || extra.stale || Boolean(extra.error)
-          if (!retryOther) filled.add(other)
-          shouldRetry ||= retryOther
-        }
-      }
-      if (controller.signal.aborted) return
-      const historical = period === 'dia' && selectedDate < currentCompetitionDay
-      const refreshDelay = historical && !shouldRetry ? HISTORICAL_REFRESH_MS : REFRESH_MS
-      timer = window.setTimeout(() => { void run() }, status.pending || status.stale ? COMPETITION_RETRY_MS : refreshDelay)
-    }
-
-    void run()
-    return () => {
-      controller.abort()
-      if (timer !== undefined) window.clearTimeout(timer)
-    }
-  }, [currentCompetitionDay, selectedDate, today, period, refreshKey, unitOrder, view])
+  }, [setParams, hasMonthlyData, refreshing, view, visible])
 
   function chooseDate(next: string) {
     if (!isIsoDate(next) || next > today) return
@@ -427,8 +448,7 @@ function CompetitionDashboard() {
               <input type="date" value={date} max={today} onChange={(event) => chooseDate(event.target.value)} className="rounded-lg bg-white/10 px-2 py-1.5 text-white outline-none [color-scheme:dark]" />
             </label> : null}
             <button type="button" aria-label="Atualizar placar" disabled={refreshing} onClick={() => {
-              setRefreshing(true)
-              setRefreshKey((value) => value + 1)
+              setRefresh((current) => ({ period, id: (current?.id ?? 0) + 1 }))
             }} className="rounded-lg bg-white/10 p-2 text-[#EFE3C4] hover:bg-white/15">
               <RefreshCw size={17} />
             </button>
@@ -468,110 +488,53 @@ function CompetitionDashboard() {
 
 function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: string }) {
   const [data, setData] = useState<KdsPayload | null>(null)
-  const [metrics, setMetrics] = useState<CompetitionBoard>({})
+  const visible = usePageVisible()
   const [period, setPeriod] = useState<CompetitionPeriod>('dia')
   const [kdsError, setKdsError] = useState('')
   const [updatedAt, setUpdatedAt] = useState(() => new Date())
   const { today, currentCompetitionDay: competitionDay } = useCompetitionDates()
 
+  const { board: metrics } = useCompetitionBoard({
+    today, day: competitionDay, currentDay: competitionDay, origin: unitId, showDay: true, showMonth: true,
+  })
+
   useEffect(() => {
-    let alive = true
-    let timer: number | undefined
+    if (!visible) return
+    const controller = new AbortController()
+    let timer: number
     const load = async () => {
       let nextRefreshMs = KDS_REFRESH_MS
       try {
         const response = await fetch(`/api/kds?unidade=${unitId}`, {
-          cache: 'no-store',
+          signal: controller.signal,
         })
         const payload = await readJson<KdsPayload & { error?: string }>(response)
         if (!response.ok) throw Object.assign(new Error(payload.error || 'Não foi possível atualizar o KDS.'), { status: response.status })
-        if (!alive) return
+        if (controller.signal.aborted) return
         setData(payload)
         setKdsError(payload.warning || '')
+        if (payload.warning) nextRefreshMs = KDS_RETRY_MS
         setUpdatedAt(new Date(payload.fetchedAt))
       } catch (reason) {
-        if (!alive) return
+        if (controller.signal.aborted) return
         const status = reason instanceof Error && 'status' in reason ? Number(reason.status) : 0
         setKdsError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o KDS.')
-        if (status === 503) nextRefreshMs = KDS_RETRY_MS
+        nextRefreshMs = status >= 400 && status < 500 ? MONTH_REFRESH_MS : KDS_RETRY_MS
       } finally {
-        if (alive) {
+        if (!controller.signal.aborted) {
           timer = window.setTimeout(() => { void load() }, nextRefreshMs)
         }
       }
     }
-    void load()
-    return () => {
-      alive = false
-      if (timer !== undefined) window.clearTimeout(timer)
-    }
-  }, [unitId])
+    timer = window.setTimeout(load, 0)
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [unitId, visible])
 
   useEffect(() => {
+    if (!visible) return
     const timer = window.setInterval(() => setPeriod((current) => current === 'dia' ? 'mes' : 'dia'), AUTO_SLIDE_MS)
     return () => window.clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let timer: number | undefined
-    let lastKitchen = 0
-    let lastMonth = 0
-    let dailyKitchenStatus: CompetitionStatus = { pending: true, error: '', stale: false }
-    const unitOrder = [unitId, ...COMPETITION_UNIT_IDS.filter((id) => id !== unitId)]
-    const dateFor = (selected: CompetitionPeriod) => selected === 'dia' ? competitionDay : today
-
-    function update(selected: CompetitionPeriod, apply: (snapshot: CompetitionSnapshot) => CompetitionSnapshot) {
-      if (controller.signal.aborted) return
-      setMetrics((current) => ({
-        ...current,
-        [selected]: apply(boardSnapshot(current, selected, dateFor(selected))),
-      }))
-    }
-
-    const load = (selected: CompetitionPeriod, kitchen = false) => loadCompetitionUnits({
-      unitIds: unitOrder,
-      date: dateFor(selected),
-      period: selected,
-      kitchen,
-      signal: controller.signal,
-      onUnit: (unit, fields, fetchedAt, stale) => update(selected, (current) => mergeCompetitionUnit(current, unit, fields, fetchedAt, stale)),
-    })
-
-    const run = async () => {
-      const sales = await load('dia')
-      if (controller.signal.aborted) return
-      if (Date.now() - lastKitchen >= 3 * REFRESH_MS || dailyKitchenStatus.stale || dailyKitchenStatus.error) {
-        dailyKitchenStatus = await load('dia', true)
-        lastKitchen = Date.now()
-      }
-      update('dia', (current) => ({
-        ...current,
-        status: {
-          pending: sales.pending || dailyKitchenStatus.pending,
-          stale: sales.stale || dailyKitchenStatus.stale,
-          error: sales.error || dailyKitchenStatus.error,
-        },
-      }))
-      if (controller.signal.aborted) return
-      let monthPending = false
-      if (Date.now() - lastMonth >= 10 * REFRESH_MS) {
-        const month = await load('mes')
-        update('mes', (current) => ({ ...current, status: month }))
-        monthPending = month.pending || month.stale
-        if (!monthPending && !month.error) lastMonth = Date.now()
-      }
-      if (!controller.signal.aborted) {
-        timer = window.setTimeout(() => { void run() }, monthPending ? COMPETITION_RETRY_MS : REFRESH_MS)
-      }
-    }
-
-    void run()
-    return () => {
-      controller.abort()
-      if (timer !== undefined) window.clearTimeout(timer)
-    }
-  }, [competitionDay, today, unitId])
+  }, [visible])
 
   const urgentOrders = data?.queue.filter((order) => order.urgent) ?? []
   const activeOrders = data?.queue ?? []

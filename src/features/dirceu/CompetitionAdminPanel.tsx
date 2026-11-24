@@ -1,6 +1,7 @@
 import { ExternalLink, RefreshCw, ShoppingBag, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
+import { usePageVisible } from './usePageVisible'
 import { Button } from '@/components/ui'
 import { COMPETITION_UNIT_IDS, loadCompetitionUnits } from '@/features/dirceu/competitionClient'
 import { competitionDayInFortaleza } from '@/features/dirceu/day'
@@ -11,43 +12,45 @@ const UNIT_DETAILS = {
   mocambinho: { name: 'Mocambinho', path: '/admin/unidade/unit-mocambinho' },
 }
 const REFRESH_MS = 60_000
-const RETRY_MS = 20_000
 
 export function CompetitionAdminPanel() {
+  const visible = usePageVisible()
   const [date, setDate] = useState(() => competitionDayInFortaleza())
   const [snapshot, setSnapshot] = useState<{ date: string; orders: Record<string, number>; updatedAt?: string }>()
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const appliedRefresh = useRef(0)
+  const completed = useRef('')
 
   useEffect(() => {
+    if (!visible) return
+    setDate(competitionDayInFortaleza())
     const timer = window.setInterval(() => setDate(competitionDayInFortaleza()), REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [visible])
 
   useEffect(() => {
+    const key = date + refreshKey
+    if (!visible || date !== competitionDayInFortaleza() || completed.current === key) return
     const controller = new AbortController()
-    let fresh = refreshKey !== appliedRefresh.current
-    let pollTimer: number | undefined
-    appliedRefresh.current = refreshKey
+    const fresh = refreshKey !== appliedRefresh.current
     setLoading(true)
     setStatus('')
 
     async function load() {
-      const refresh = fresh
-      fresh = false
+      appliedRefresh.current = refreshKey
       const result = await loadCompetitionUnits({
         unitIds: COMPETITION_UNIT_IDS,
         date,
         period: 'dia',
-        fresh: refresh,
+        fresh,
         signal: controller.signal,
         onUnit: ({ id, orders }, fields, fetchedAt, stale) => {
           if (controller.signal.aborted || !fields.orders || orders === null) return
           setSnapshot((current) => {
             const previous = current?.date === date ? current : { date, orders: {} }
-            if (stale && previous.orders[id] !== undefined) return previous
+            if (stale && !fetchedAt && previous.orders[id] !== undefined) return previous
             const updatedAt = fetchedAt && (!previous.updatedAt || Date.parse(fetchedAt) > Date.parse(previous.updatedAt))
               ? fetchedAt
               : previous.updatedAt
@@ -56,21 +59,20 @@ export function CompetitionAdminPanel() {
         },
       })
       if (controller.signal.aborted) return
+      completed.current = key
       setLoading(false)
       if (result.error) setStatus('Uma ou mais unidades estão indisponíveis. Últimos dados do turno em exibição, quando disponíveis.')
-      else if (result.stale) setStatus('Atualização em andamento. Últimos dados do turno em exibição.')
+      else if (result.stale) setStatus('Último total disponível em exibição. Use Atualizar para consultar o turno novamente.')
       else if (result.pending) setStatus('Aguardando os totais do turno.')
       else setStatus('')
-      const delay = result.stale || result.pending ? RETRY_MS : REFRESH_MS
-      pollTimer = window.setTimeout(() => { void load() }, delay)
     }
 
-    void load()
+    const timer = window.setTimeout(load, 0)
     return () => {
       controller.abort()
-      if (pollTimer !== undefined) window.clearTimeout(pollTimer)
+      window.clearTimeout(timer)
     }
-  }, [date, refreshKey])
+  }, [date, refreshKey, visible])
 
   const current = snapshot?.date === date ? snapshot : undefined
   const updatedAt = current?.updatedAt

@@ -10,6 +10,11 @@ function isIsoDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
+function cachePublicResult(res, seconds) {
+  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
+  res.setHeader('Vercel-CDN-Cache-Control', `public, s-maxage=${seconds}`)
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
@@ -40,6 +45,7 @@ export default async function handler(req, res) {
     if (period === 'mes') {
       const span = await loadCompetitionSpan({ ...options, start: `${date.slice(0, 7)}-01`, end: date })
       if (span.fill) waitUntil(span.fill().catch(() => undefined))
+      if (!fresh && requestedDate === today && !span.partial && !span.stale) cachePublicResult(res, 60)
       return res.status(200).json({
         date,
         period,
@@ -54,6 +60,7 @@ export default async function handler(req, res) {
 
     const result = await loadCompetitionDay({ ...options, day: date })
     if (result.refresh) waitUntil(result.refresh().catch(() => undefined))
+    if (!fresh && requestedDate && !result.stale && !result.error) cachePublicResult(res, 30)
     return res.status(200).json({
       date,
       period,

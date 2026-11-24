@@ -1,9 +1,7 @@
 {
   "functions": {
-    "api/dirceu.js": {
-      "maxDuration": 300
-    },
     "api/saipos.js": {
+      "supportsCancellation": true,
       "maxDuration": 300
     },
     "api/competition.js": {
@@ -16,5 +14,8 @@
       "maxDuration": 180
     }
   },
-  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/dirceu", "destination": "/api/saipos?unidade=dirceu" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
 }

@@ -25,10 +25,12 @@ function remember(id, snapshot) {
   return snapshot
 }
 
-export async function readCompetitionSnapshot(unitId, day, metric, checkRegion = false) {
+export async function readCompetitionSnapshot(unitId, day, metric, maxAgeMs = LOCAL_READ_TTL_MS) {
   const id = key(unitId, day, metric)
   const entry = local.get(id)
-  if (!checkRegion && entry && Date.now() - entry.checkedAt < LOCAL_READ_TTL_MS) return entry.snapshot
+  // A day pending in another instance should become visible promptly.
+  const ttl = entry?.snapshot ? maxAgeMs : Math.min(maxAgeMs, LOCAL_READ_TTL_MS)
+  if (entry && Date.now() - entry.checkedAt < ttl) return entry.snapshot
   let regional
   try {
     regional = await cache.get(id)
@@ -44,7 +46,7 @@ export async function readCompetitionSnapshot(unitId, day, metric, checkRegion =
 export async function saveCompetitionSnapshot(unitId, day, metric, snapshot) {
   if (!isSnapshot(snapshot, metric)) throw new Error('A Saipos devolveu métricas inválidas para este turno.')
   const id = key(unitId, day, metric)
-  const current = await readCompetitionSnapshot(unitId, day, metric, true)
+  const current = await readCompetitionSnapshot(unitId, day, metric, 0)
   if (current && current.fetchedAt > snapshot.fetchedAt) return current
   remember(id, snapshot)
   try {

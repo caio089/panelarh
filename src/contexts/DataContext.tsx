@@ -157,12 +157,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [candidatosError, setCandidatosError] = useState('')
   const vagaWrite = useRef(0)
   const candidatoWrite = useRef(0)
+  const pullingShared = useRef(false)
+  const lastPull = useRef(-Infinity)
 
   useEffect(() => {
     saveDemoStore(store)
   }, [store])
 
   const pullShared = useCallback(async () => {
+    if (document.hidden || pullingShared.current || Date.now() - lastPull.current < 30_000) return
+    pullingShared.current = true
+    lastPull.current = Date.now()
     const seenVagas = vagaWrite.current
     const seenCandidatos = candidatoWrite.current
     try {
@@ -183,17 +188,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (message.includes('candidat')) setCandidatosError(message)
       else setVagasError(message)
     } finally {
+      pullingShared.current = false
       setSharedReady(true)
     }
   }, [])
 
   useEffect(() => {
-    void pullShared()
-    const onFocus = () => {
-      void pullShared()
-    }
+    const timer = window.setTimeout(pullShared, 0)
+    const onFocus = () => { void pullShared() }
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
   }, [pullShared])
 
   const resetDemoData = useCallback(() => {

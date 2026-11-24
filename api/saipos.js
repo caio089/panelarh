@@ -9,7 +9,8 @@ export default async function handler(req, res) {
   const unit = saiposUnit(typeof req.query?.unidade === 'string' ? req.query.unidade : '')
   if (!unit) return res.status(400).json({ error: 'Unidade Saipos inválida.' })
   const controller = new AbortController()
-  req.on?.('close', () => {
+  req.on?.('error', () => controller.abort())
+  res.on?.('close', () => {
     if (!res.writableEnded) controller.abort()
   })
   await pipeDirceuReport(

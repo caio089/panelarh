@@ -16,23 +16,33 @@ const COMPETITION_CACHE_LIMIT = 90
 
 /** No máximo duas consultas no total: a API de dados da Saipos limita o pool compartilhado. */
 let inFlight = 0
-const waiters = []
+const waiters = new Set()
 
-function oneAtATime(task) {
+function oneAtATime(task, signal) {
   return new Promise((resolve, reject) => {
-    const run = () => {
+    const abort = () => {
+      waiters.delete(run)
+      reject(new DOMException('Consulta cancelada.', 'AbortError'))
+    }
+    function run() {
+      signal?.removeEventListener('abort', abort)
       inFlight += 1
       Promise.resolve()
         .then(task)
         .then(resolve, reject)
         .finally(() => {
           inFlight -= 1
-          const next = waiters.shift()
-          if (next) next()
+          const next = waiters.values().next().value
+          if (next) {
+            waiters.delete(next)
+            next()
+          }
         })
     }
-    if (inFlight < MAX_IN_FLIGHT) run()
-    else waiters.push(run)
+    if (signal?.aborted) return abort()
+    if (inFlight < MAX_IN_FLIGHT) return run()
+    waiters.add(run)
+    signal?.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -52,20 +62,6 @@ const COMPETITION_SALE_TYPES = new Set([1, 3])
 
 export function todayInFortaleza(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now)
-}
-
-/** O KDS acompanha o turno noturno da loja, inclusive depois da meia-noite. */
-export function currentShiftDateInFortaleza(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TIME_ZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now)
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
-  const today = todayInFortaleza(now)
-  return hour * 60 + minute >= 17 * 60 + 30 ? today : shiftIsoDate(today, -1)
 }
 
 export function shiftIsoDate(iso, delta) {
@@ -172,7 +168,7 @@ async function saiposGet(path, params, token, signal) {
       }
     }
     throw new Error(lastMessage)
-  })
+  }, signal)
 }
 
 async function* saiposPages(path, params, token, signal, maxPages = MAX_PAGES, pageSize = PAGE_SIZE) {
@@ -304,14 +300,6 @@ function competitionKitchenSeconds(row) {
     timed = true
   }
   return timed ? seconds : null
-}
-
-/** Quantidade de entrega + salão já sem canceladas. O relatório operacional continua com todos os canais. */
-export function competitionOrderCount(report) {
-  const types = Array.isArray(report?.byType) ? report.byType : []
-  return types.reduce((sum, item) => (
-    COMPETITION_SALE_TYPES.has(num(item.id)) ? sum + num(item.count) : sum
-  ), 0)
 }
 
 function clock(value) {
@@ -623,15 +611,21 @@ function summarizeFinance(rows) {
 
 const dayCache = new Map()
 const rawCache = new Map()
-const RAW_CACHE_LIMIT = 90
+const REPORT_CACHE_LIMIT = 90
 
-function rememberRaw(key, rows) {
-  if (rawCache.has(key)) rawCache.delete(key)
-  rawCache.set(key, rows)
-  while (rawCache.size > RAW_CACHE_LIMIT) {
-    const oldest = rawCache.keys().next().value
-    rawCache.delete(oldest)
-  }
+function readReportCache(cache, key) {
+  const entry = cache.get(key)
+  if (entry && entry.expiresAt > Date.now()) return entry.value
+  cache.delete(key)
+  return null
+}
+
+function saveReportCache(cache, key, value, day) {
+  const recent = day >= shiftIsoDate(todayInFortaleza(), -1)
+  const ttl = recent ? 60_000 : 24 * 60 * 60_000
+  cache.delete(key)
+  cache.set(key, { value, expiresAt: Date.now() + ttl })
+  if (cache.size > REPORT_CACHE_LIMIT) cache.delete(cache.keys().next().value)
 }
 
 const KITCHEN_STAGES = ['Cozinha', 'Aguardando Entrega', 'Saiu para entrega', 'Entregue', 'Finalizado', 'Cancelados']
@@ -865,7 +859,8 @@ function summarizeCompetitionHistories(rows) {
 
 async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 'dirceu') {
   const key = `${cacheScope}:${spec.path}:${spec.filter}:${day}`
-  if (!fresh && rawCache.has(key)) return rawCache.get(key)
+  const cached = !fresh && readReportCache(rawCache, key)
+  if (cached) return cached
   const rows = []
   for await (const page of saiposPages(
     spec.path,
@@ -878,7 +873,7 @@ async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 
     rows.push(...page.batch)
     if (page.last) break
   }
-  rememberRaw(key, rows)
+  saveReportCache(rawCache, key, rows, day)
   return rows
 }
 
@@ -897,8 +892,8 @@ async function* loadRangeSteps(spec, start, end, token, signal, fresh = false, c
 async function* streamDirceuReport(day, period, category, token, signal, fresh = false, unit = 'Dirceu', cacheScope = 'dirceu') {
   const spec = CATEGORIES[category]
   const bounds = periodBounds(day, period, todayInFortaleza())
-  const key = `${cacheScope}:${bounds.start}:${bounds.end}:${category}`
-  const cached = fresh ? null : dayCache.get(key)
+  const key = `${cacheScope}:${day}:${period}:${bounds.end}:${category}`
+  const cached = fresh ? null : readReportCache(dayCache, key)
   if (cached) {
     yield { status: 200, body: { ...cached, partial: false } }
     return
@@ -909,7 +904,7 @@ async function* streamDirceuReport(day, period, category, token, signal, fresh =
     for await (const step of loadRangeSteps(spec, bounds.start, bounds.end, token, signal, fresh, cacheScope)) {
       latest = reportBody(day, period, bounds, category, step.rows, spec.summarize, step.partial, unit)
       yield { status: 200, body: latest }
-      if (!step.partial && !signal?.aborted) dayCache.set(key, latest)
+      if (!step.partial && !signal?.aborted) saveReportCache(dayCache, key, latest, bounds.end)
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error
@@ -932,7 +927,7 @@ export async function pipeDirceuReport(date, category, token, signal, period = '
     response.end(JSON.stringify({ error: 'Informe o dia no formato AAAA-MM-DD.' }))
     return
   }
-  if (!CATEGORIES[category]) {
+  if (!Object.hasOwn(CATEGORIES, category)) {
     response.statusCode = 400
     response.setHeader('Content-Type', 'application/json; charset=utf-8')
     response.end(JSON.stringify({ error: 'Escolha cozinha, faturamento, itens, entregas ou financeiro.' }))
@@ -987,7 +982,7 @@ export async function getSaiposReport({ date, category, token, signal, period = 
   const day = date || todayInFortaleza()
   const span = period === 'semana' || period === 'mes' ? period : 'dia'
   if (!isIsoDate(day)) throw new Error('Informe o dia no formato AAAA-MM-DD.')
-  if (!CATEGORIES[category]) throw new Error('Categoria Saipos inválida.')
+  if (!Object.hasOwn(CATEGORIES, category)) throw new Error('Categoria Saipos inválida.')
   if (!normalizeToken(token)) throw new Error(`A chave da Saipos para ${unit} não está configurada no servidor.`)
 
   let latest = null
@@ -1110,12 +1105,4 @@ export async function getSaiposCompetitionMetrics({ start, end, token, signal, f
     dailyKitchenMinutes,
     dailyKitchenTotals,
   }
-}
-
-/**
- * Conta entrega e salão de cada dia, sem canceladas, balcão ou ficha.
- */
-export async function getSaiposDailySalesCounts({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
-  const { counts } = await getSaiposCompetitionMetrics({ start, end, token, signal, fresh, cacheScope })
-  return counts
 }

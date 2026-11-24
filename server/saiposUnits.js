@@ -5,5 +5,5 @@ export const SAIPOS_UNITS = {
 }
 
 export function saiposUnit(id) {
-  return SAIPOS_UNITS[id] ?? null
+  return Object.hasOwn(SAIPOS_UNITS, id) ? SAIPOS_UNITS[id] : null
 }

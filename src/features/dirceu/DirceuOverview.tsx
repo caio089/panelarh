@@ -93,15 +93,13 @@ export function DirceuOverview({ paramPrefix = '', unit = 'dirceu', unitName = '
           </div>
         ) : null}
         {report ? <DirceuReportView payload={report} /> : null}
-        {period === 'dia' && category ? (
-          <p className="text-sm text-[var(--pv-ink)]/65" aria-live="polite">
-            {loading && report ? 'Atualizando os números.' : 'Este dia atualiza sozinho a cada 10 minutos.'}
-            {report?.partial ? ' Os números ainda estão entrando.' : ''}
-          </p>
-        ) : report?.partial ? (
-          <p className="text-sm text-[var(--pv-ink)]/65" aria-live="polite">
-            Os números ainda estão entrando.
-          </p>
+        {category && !error ? (
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="outline" disabled={loading} onClick={retry}>
+              <RefreshCw size={14} /> Atualizar relatório
+            </Button>
+            {report?.partial ? <p role="status" className="text-sm text-[var(--pv-ink)]/65">Os números ainda estão entrando.</p> : null}
+          </div>
         ) : null}
       </div>
     </section>

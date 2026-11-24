@@ -35,3 +35,7 @@ Schema: `server/schema.sql`
 - `npm run server` — só API SQLite
 - `npm run dev:all` — os dois juntos
 - `npm run build` — build de produção
+
+## Histórico mensal das TVs
+
+A migração `competition_fill_lease` cria uma reserva de 75 segundos por unidade para os lotes de até 60 segundos da Saipos. Ao ativar um ambiente Vercel que usa a Saipos de produção, configure a variável sensível de servidor `COMPETITION_WORKER_KEY` com o valor de `worker_key` gerado em `competition_worker.fill_leases`. A função usa também `VITE_SUPABASE_URL` e a chave pública do mesmo projeto. Se a reserva estiver ocupada ou indisponível, a TV continua exibindo os dados já obtidos e tenta completar o histórico no próximo ciclo.

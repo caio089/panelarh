@@ -9,6 +9,31 @@ const FAILURE_LIMIT = 256
 const pendingDays = new Map()
 const pendingMonths = new Map()
 const retryTimes = new Map()
+const leaseRetryTimes = new Map()
+
+async function claimMonthlyFill(unitId) {
+  const workerKey = process.env.COMPETITION_WORKER_KEY
+  if (!workerKey && process.env.VERCEL !== '1') return true // Local development uses pendingMonths.
+  if (Date.now() < (leaseRetryTimes.get(unitId) ?? 0)) return false
+  // Limit failed/contended attempts on this instance. The database owns mutual exclusion.
+  leaseRetryTimes.set(unitId, Date.now() + 15_000)
+  try {
+    const url = process.env.VITE_SUPABASE_URL
+    const apiKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
+    if (!url || !apiKey || !workerKey) throw new Error('Configuração do worker ausente')
+    const response = await fetch(new URL('/rest/v1/rpc/claim_competition_fill', url), {
+      method: 'POST',
+      headers: { apikey: apiKey, 'Content-Type': 'application/json', 'x-competition-worker': workerKey },
+      body: JSON.stringify({ p_unit_id: unitId }),
+      signal: AbortSignal.timeout(3_000),
+    })
+    if (!response.ok) throw new Error(`Supabase HTTP ${response.status}`)
+    return (await response.json()) === true
+  } catch (error) {
+    console.warn('Preenchimento mensal adiado:', unitId, error instanceof Error ? error.message : 'Falha ao obter reserva')
+    return false
+  }
+}
 
 function dayKey(unitId, day, metric) {
   return `${unitId}:${day}:${metric}`
@@ -70,6 +95,9 @@ export async function loadCompetitionDay({ unitId, day, today, token, kitchenOnl
   if (snapshot && !fresh) {
     return { snapshot, stale, refresh: stale && canRetry(unitId, day, metric) ? refresh : null }
   }
+  if (!fresh && !canRetry(unitId, day, metric)) {
+    throw new Error('A Saipos está temporariamente indisponível. Tente novamente em um minuto.')
+  }
   try {
     return { snapshot: await refresh(), stale: false, refresh: null }
   } catch (error) {
@@ -87,16 +115,17 @@ export function competitionDayPayload(snapshot, kitchenOnly) {
 export async function loadCompetitionSpan({ unitId, token, start, end, today, kitchenOnly, fresh = false }) {
   const days = []
   for (let day = start; day <= end; day = shiftIsoDate(day, 1)) days.push(day)
+  const yesterday = shiftIsoDate(today, -1)
   const data = await Promise.all(days.map(async (day) => {
+    const localTtl = fresh ? 0 : day < yesterday ? 5 * 60_000 : 30_000
     const [sales, kitchen] = await Promise.all([
-      readCompetitionSnapshot(unitId, day, 'sales'),
-      readCompetitionSnapshot(unitId, day, 'kitchen'),
+      readCompetitionSnapshot(unitId, day, 'sales', localTtl),
+      readCompetitionSnapshot(unitId, day, 'kitchen', localTtl),
     ])
     return { day, sales, kitchen }
   }))
 
   const now = Date.now()
-  const yesterday = shiftIsoDate(today, -1)
   const coverage = { totalDays: days.length, salesDays: 0, kitchenDays: 0 }
   let orders = 0
   let seconds = 0
@@ -162,16 +191,18 @@ function fillDays({ unitId, token, work, fresh, now }) {
   }
   const signal = AbortSignal.timeout(FILL_BUDGET_MS)
   const task = (async () => {
+    if (!await claimMonthlyFill(unitId) || signal.aborted) return
     const failedSales = new Set()
     const refreshedSales = new Set()
     // As vendas podem ficar completas mesmo quando a consulta de histórico está indisponível.
     for (const metric of ['sales', 'kitchen']) {
-      for (const { day, forceDay } of work[metric].slice(0, FILL_METRIC_BATCH_SIZE)) {
+      for (const { day, forceDay, fetchedAt } of work[metric].slice(0, FILL_METRIC_BATCH_SIZE)) {
         if (signal.aborted) return
         if (failedSales.has(day)) continue
         try {
-          const recent = await readCompetitionSnapshot(unitId, day, metric)
-          if (!recent || recent.fetchedAt <= now) {
+          const recent = await readCompetitionSnapshot(unitId, day, metric, 0)
+          const lastSeen = forceDay ? now : fetchedAt
+          if (!recent || recent.fetchedAt <= lastSeen) {
             const freshSales = metric === 'kitchen' && forceDay && !refreshedSales.has(day)
             await refreshDayMetric({ unitId, token, day, metric, freshSales, signal })
           }

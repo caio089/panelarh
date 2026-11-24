@@ -61,7 +61,7 @@ export async function fetchCompetitionUnit({
   if (kitchen) params.set('dados', 'cozinha')
   if (daily) params.set('modo', 'diario')
   if (fresh) params.set('atualiza', '1')
-  const response = await fetch(`/api/competition?${params}`, { cache: 'no-store', signal })
+  const response = await fetch(`/api/competition?${params}`, { signal })
   const payload = await readJson<CompetitionResponse>(response)
   if (!response.ok || !payload.unit) {
     throw new Error(payload.error || 'Não foi possível atualizar a unidade.')
