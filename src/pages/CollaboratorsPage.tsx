@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, FileText, LogIn, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, ExternalLink, FileText, Link2, LogIn, Pencil, Plus, RefreshCw, Search, Trash2, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Field, Input, Modal, PageHeader, Select, Textarea } from '@/components/ui'
 import { ConfirmDialog } from '@/features/gestao/components/ConfirmDialog'
@@ -21,6 +21,13 @@ import {
   type RhCollaborator,
   type RhUnit,
 } from '@/lib/collaboratorsDb'
+import {
+  createCollaboratorPortalLink,
+  loadDocumentAdminSnapshot,
+  revokeCollaboratorPortalLink,
+  uploadCollaboratorPdf,
+  type CollaboratorDocumentAdminSnapshot,
+} from '@/lib/collaboratorDocuments'
 
 type FormMode = 'falta' | 'atestado' | 'advertencia' | 'suspensao' | 'documento'
 
@@ -39,6 +46,20 @@ const HISTORY_LABEL: Record<string, string> = {
   documento: 'Documento',
   sid: 'SID',
   admissao: 'Admissão',
+}
+const DOCUMENT_LABEL: Record<string, string> = {
+  holerite: 'Holerite',
+  exame_admissional: 'Exame admissional',
+  exame_periodico: 'Exame periódico',
+  aso: 'ASO',
+  contrato: 'Contrato',
+  ferias: 'Férias',
+  falta: 'Falta',
+  atestado: 'Atestado',
+  advertencia: 'Advertência',
+  suspensao: 'Suspensão',
+  comunicado: 'Comunicado',
+  outro: 'Documento',
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -65,6 +86,7 @@ export function CollaboratorsPage() {
   const [deleting, setDeleting] = useState<CollaboratorHistoryEvent | null>(null)
   const [clearing, setClearing] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
+  const [documentsVersion, setDocumentsVersion] = useState(0)
 
   const people = collaborators
   const selected = people.find((person) => person.id === selectedId) ?? null
@@ -136,24 +158,55 @@ export function CollaboratorsPage() {
     setFormError('')
     try {
       if (input.mode === 'documento') {
-        await registerRhDocument({
-          collaboratorId: selected.id,
-          kind: input.kind,
-          competence: input.competence,
-          notes: input.notes,
-        })
+        if (input.file) {
+          await uploadCollaboratorPdf({
+            collaboratorId: selected.id,
+            kind: input.kind,
+            competence: input.competence,
+            notes: input.notes,
+            file: input.file,
+            requiresAcknowledgement: input.requiresAcknowledgement,
+          })
+        } else {
+          await registerRhDocument({
+            collaboratorId: selected.id,
+            kind: input.kind,
+            competence: input.competence,
+            notes: input.notes,
+          })
+        }
       } else {
-        await registerRhOccurrence({
+        const occurrenceId = await registerRhOccurrence({
           collaboratorId: selected.id,
           kind: input.mode,
           occurredOn: input.occurredOn,
           note: input.note,
           days: input.days,
         })
+        if (input.file) {
+          try {
+            await uploadCollaboratorPdf({
+              collaboratorId: selected.id,
+              kind: input.mode,
+              competence: input.occurredOn,
+              notes: input.notes,
+              file: input.file,
+              requiresAcknowledgement: input.requiresAcknowledgement,
+              sourceKind: 'ocorrencia',
+              sourceId: occurrenceId,
+            })
+          } catch (reason) {
+            setMode(null)
+            setPageError(`O registro foi salvo, mas o PDF não foi anexado. ${reason instanceof Error ? reason.message : ''}`.trim())
+            setHistory((await listCollaboratorHistory(selected.id)) || [])
+            return
+          }
+        }
       }
       setMode(null)
       setNotice(RECORD_TITLE[input.mode].replace('Registrar', 'Registrado'))
       setHistory((await listCollaboratorHistory(selected.id)) || [])
+      setDocumentsVersion((version) => version + 1)
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : 'Não foi possível salvar o registro.')
     } finally {
@@ -285,6 +338,7 @@ export function CollaboratorsPage() {
               onEditEvent={setEditing}
               onDeleteEvent={setDeleting}
               onClearHistory={() => setClearing(true)}
+              documentsVersion={documentsVersion}
             />
           ) : (
             <EmptyPanel />
@@ -441,6 +495,7 @@ function PersonPanel({
   onEditEvent,
   onDeleteEvent,
   onClearHistory,
+  documentsVersion,
 }: {
   person: RhCollaborator
   dossier: CollaboratorDossier | null
@@ -456,6 +511,7 @@ function PersonPanel({
   onEditEvent: (event: CollaboratorHistoryEvent) => void
   onDeleteEvent: (event: CollaboratorHistoryEvent) => void
   onClearHistory: () => void
+  documentsVersion: number
 }) {
   const [showFile, setShowFile] = useState(false)
   const counts = history.reduce<Record<string, number>>((total, event) => {
@@ -516,6 +572,8 @@ function PersonPanel({
       </button>
       {showFile ? <Dossier dossier={dossier} /> : null}
 
+      <DocumentPortalPanel person={person} refreshKey={documentsVersion} />
+
       <div className="mt-6 flex items-center justify-between gap-3">
         <h3 className="font-display text-xl text-[var(--pv-ink)]">Histórico</h3>
         {history.some((event) => event.event_type !== 'admissao') ? (
@@ -555,6 +613,135 @@ function PersonPanel({
         </ol>
       )}
     </div>
+  )
+}
+
+function DocumentPortalPanel({ person, refreshKey }: { person: RhCollaborator; refreshKey: number }) {
+  const [snapshot, setSnapshot] = useState<CollaboratorDocumentAdminSnapshot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+  const [shareUrl, setShareUrl] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setSnapshot(await loadDocumentAdminSnapshot(person.id))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível carregar os documentos.')
+    } finally {
+      setLoading(false)
+    }
+  }, [person.id])
+
+  useEffect(() => {
+    setShareUrl('')
+    setCopied(false)
+    void load()
+  }, [load, refreshKey])
+
+  async function generateLink() {
+    setWorking(true)
+    setError('')
+    try {
+      const url = await createCollaboratorPortalLink(person.id)
+      setShareUrl(url)
+      setCopied(false)
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível gerar o link.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function copyLink() {
+    if (!shareUrl) return
+    try {
+      await window.navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+    } catch {
+      setError('Não consegui copiar automaticamente. Selecione o link e copie manualmente.')
+    }
+  }
+
+  async function revokeLink() {
+    setWorking(true)
+    setError('')
+    try {
+      await revokeCollaboratorPortalLink(person.id)
+      setShareUrl('')
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível desativar o link.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <section className="mt-6 rounded-2xl border border-[var(--pv-line)] bg-[#F7F4EC] p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-bold text-[var(--pv-navy)]"><Link2 size={16} /> Documentos e link do colaborador</p>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--pv-muted)]">PDFs privados, contratos, holerites e confirmações de leitura.</p>
+        </div>
+        <Button type="button" size="sm" variant="navy" onClick={() => void generateLink()} disabled={working}>
+          <RefreshCw size={14} /> {snapshot?.portal.active ? 'Gerar novo link' : 'Gerar link'}
+        </Button>
+      </div>
+
+      {error ? <Alert tone="error" className="mt-3">{error}</Alert> : null}
+      {shareUrl ? (
+        <div className="mt-4 rounded-xl bg-white p-3">
+          <p className="text-xs font-bold text-[var(--pv-success)]">Novo link criado. Envie somente para {person.full_name}.</p>
+          <div className="mt-2 flex gap-2">
+            <Input readOnly value={shareUrl} aria-label="Link do colaborador" />
+            <Button type="button" size="sm" onClick={() => void copyLink()}><Copy size={14} /> {copied ? 'Copiado' : 'Copiar'}</Button>
+          </div>
+        </div>
+      ) : snapshot?.portal.active ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white p-3">
+          <div>
+            <p className="text-xs font-bold text-[var(--pv-success)]">Link ativo</p>
+            <p className="mt-0.5 text-xs text-[var(--pv-muted)]">
+              {snapshot.portal.last_accessed_at ? `Acessado em ${formatDateBR(snapshot.portal.last_accessed_at)}.` : 'Ainda não acessado.'} Gere um novo link somente se precisar substituir o anterior.
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="ghost" onClick={() => void revokeLink()} disabled={working}>Desativar</Button>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <p className="mt-4 text-sm text-[var(--pv-muted)]">Carregando documentos…</p>
+      ) : snapshot && snapshot.documents.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {snapshot.documents.map((document) => (
+            <div key={document.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-3 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-[var(--pv-ink)]">{DOCUMENT_LABEL[document.kind] || 'Documento'} · {document.file_name}</p>
+                <p className="mt-0.5 text-xs text-[var(--pv-muted)]">
+                  {document.status === 'disponivel' ? 'Disponível' : 'Envio pendente'}
+                  {document.acknowledged_at ? ` · Lido por ${document.signer_name} em ${formatDateBR(document.acknowledged_at)}` : document.requires_acknowledgement ? ' · Leitura pendente' : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {document.acknowledged_at ? <CheckCircle2 size={17} className="text-[var(--pv-success)]" /> : null}
+                {document.view_url ? (
+                  <a href={document.view_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-[var(--pv-navy)] hover:underline">
+                    <ExternalLink size={13} /> Abrir PDF
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-[var(--pv-muted)]">Nenhum PDF anexado ainda. Use os botões acima para registrar e anexar.</p>
+      )}
+    </section>
   )
 }
 
@@ -754,6 +941,8 @@ interface RecordInput {
   days: number
   kind: string
   competence: string
+  file: File | null
+  requiresAcknowledgement: boolean
 }
 
 function RecordForm({
@@ -773,6 +962,8 @@ function RecordForm({
   const [notes, setNotes] = useState('')
   const [days, setDays] = useState('1')
   const [docKind, setDocKind] = useState('holerite')
+  const [file, setFile] = useState<File | null>(null)
+  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(true)
   const occurrence = mode !== 'documento'
   const asksDays = mode === 'falta' || mode === 'atestado' || mode === 'suspensao'
 
@@ -781,6 +972,8 @@ function RecordForm({
     setNotes('')
     setDays('1')
     setDocKind('holerite')
+    setFile(null)
+    setRequiresAcknowledgement(true)
   }, [mode])
 
   return (
@@ -796,6 +989,8 @@ function RecordForm({
           days: Number(days) || 1,
           kind: docKind,
           competence: date,
+          file,
+          requiresAcknowledgement,
         })
       }}
     >
@@ -837,6 +1032,25 @@ function RecordForm({
           </Field>
         </>
       )}
+      <Field label="Anexar PDF" hint="Opcional · PDF de até 10 MB. O arquivo ficará privado.">
+        <Input
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
+          className="file:mr-3 file:rounded-lg file:border-0 file:bg-[#F1EDE0] file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-[var(--pv-navy)]"
+        />
+      </Field>
+      {file ? (
+        <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-white p-3 text-xs font-semibold text-[var(--pv-ink)]">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={requiresAcknowledgement}
+            onChange={(event) => setRequiresAcknowledgement(event.target.checked)}
+          />
+          Pedir que o colaborador confirme que abriu e leu este PDF.
+        </label>
+      ) : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>

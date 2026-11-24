@@ -23,6 +23,7 @@ import { GestaoStoreProvider } from '@/features/gestao/GestaoStoreProvider'
 import { canonicalTvPath, TvCompetitionPage } from '@/pages/TvCompetitionPage'
 import { PeopleOpsPage } from '@/pages/PeopleOpsPage'
 import { CollaboratorsPage } from '@/pages/CollaboratorsPage'
+import { CollaboratorPortalPage } from '@/pages/CollaboratorPortalPage'
 
 function UnknownRoute() {
   const { pathname, search, hash } = useLocation()
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/dirceu" element={<TvCompetitionPage />} />
           <Route path="/promorar" element={<TvCompetitionPage />} />
           <Route path="/mocambinho" element={<TvCompetitionPage />} />
+          <Route path="/colaborador/:token" element={<CollaboratorPortalPage />} />
 
           {/* Legado candidato → site público */}
           <Route path="/auth" element={<Navigate to="/" replace />} />

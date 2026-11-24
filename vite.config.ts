@@ -8,7 +8,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 /** Executa os mesmos handlers de produção no servidor de desenvolvimento. */
 function localApiRoutes(): Plugin {
-  const routes = new Set(['/api/kds', '/api/competition', '/api/saipos', '/api/dirceu', '/api/selecao'])
+  const routes = new Set(['/api/kds', '/api/competition', '/api/saipos', '/api/dirceu', '/api/selecao', '/api/rh-documents'])
   return {
     name: 'local-api-routes',
     configureServer(server) {
