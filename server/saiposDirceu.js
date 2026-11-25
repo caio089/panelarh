@@ -57,9 +57,6 @@ const SALE_TYPES = {
   4: 'Ficha',
 }
 
-/** Competição: entrega e salão. Balcão (2) e ficha (4) ficam de fora dos dois lados. */
-const COMPETITION_SALE_TYPES = new Set([1, 3])
-
 export function todayInFortaleza(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(now)
 }
@@ -261,10 +258,6 @@ function isCanceledSale(row) {
   return row.canceled === 'Y' || row.canceled === true
 }
 
-function isCompetitionSale(row) {
-  return COMPETITION_SALE_TYPES.has(num(row.id_sale_type)) && !isCanceledSale(row)
-}
-
 function saleKey(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return text(value)
@@ -282,26 +275,19 @@ function durationStats(seconds) {
   }
 }
 
-/**
- * Soma o tempo no status Cozinha. Uma venda conta uma vez.
- * Etapa ainda aberta (duração zero) e cancelamento não entram na média.
- */
-function competitionKitchenSeconds(row) {
+/** Durações que a Saipos registra em cada passagem pelo status Cozinha. */
+function competitionKitchenDurations(row) {
   const steps = (Array.isArray(row.histories) ? row.histories : [])
     .slice()
     .sort((a, b) => num(a.order) - num(b.order))
-  const lastName = text(steps[steps.length - 1]?.desc_store_sale_status)
-  if (/cancel/i.test(lastName)) return null
-  let seconds = 0
-  let timed = false
+  const durations = []
   for (const step of steps) {
     if (text(step.desc_store_sale_status) !== 'Cozinha') continue
     const value = Number(step.duration_time_seconds)
     if (!Number.isFinite(value) || value <= 0) continue
-    seconds += value
-    timed = true
+    durations.push(value)
   }
-  return timed ? seconds : null
+  return durations
 }
 
 function clock(value) {
@@ -839,24 +825,25 @@ function latestCompetitionRows(rows) {
 
 function summarizeCompetitionSales(rows) {
   const { byId, unkeyed } = latestCompetitionRows(rows)
-  const ids = new Set()
-  let count = unkeyed.filter(isCompetitionSale).length
-  for (const [id, row] of byId) {
-    if (!isCompetitionSale(row)) continue
+  let count = unkeyed.filter((row) => !isCanceledSale(row)).length
+  for (const row of byId.values()) {
+    if (isCanceledSale(row)) continue
     count += 1
-    ids.add(id)
   }
-  return { count, ids }
+  return count
 }
 
 function summarizeCompetitionHistories(rows) {
   const { byId } = latestCompetitionRows(rows)
-  const durations = new Map()
-  for (const [id, row] of byId) {
-    const seconds = competitionKitchenSeconds(row)
-    if (seconds !== null) durations.set(id, seconds)
+  let seconds = 0
+  let samples = 0
+  for (const row of byId.values()) {
+    for (const duration of competitionKitchenDurations(row)) {
+      seconds += duration
+      samples += 1
+    }
   }
-  return durations
+  return { seconds, samples }
 }
 
 async function loadOneDay(spec, day, token, signal, fresh = false, cacheScope = 'dirceu') {
@@ -1056,7 +1043,7 @@ export async function getSaiposCompetitionSales({ date, token, signal, fresh = f
   if (!isIsoDate(date)) throw new Error('Informe o dia no formato AAAA-MM-DD.')
   if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
   const sales = await loadCompetitionSource(CATEGORIES.faturamento, summarizeCompetitionSales, { date, token, signal, fresh, cacheScope })
-  return sales.count
+  return sales
 }
 
 function averageCompetitionMinutes(seconds, samples) {
@@ -1064,37 +1051,22 @@ function averageCompetitionMinutes(seconds, samples) {
 }
 
 /**
- * A venda define o canal e o cancelamento. O histórico define a duração.
- * O cruzamento por id_sale dá o mesmo peso a cada venda elegível com tempo.
+ * Replica o relatório Tempo por status da Saipos: cada passagem positiva por
+ * Cozinha é uma amostra. Uma venda que volta à Cozinha gera outra passagem,
+ * em vez de ter os tempos somados e receber peso único.
  */
-export async function getSaiposCompetitionMetrics({ start, end, token, signal, fresh = false, freshSales = fresh, cacheScope = 'dirceu' }) {
+export async function getSaiposCompetitionMetrics({ start, end, token, signal, fresh = false, cacheScope = 'dirceu' }) {
   if (!isIsoDate(start) || !isIsoDate(end) || start > end) throw new Error('Informe um intervalo de datas válido.')
   if (!normalizeToken(token)) throw new Error('A chave da Saipos não está configurada no servidor.')
 
-  const counts = new Map()
   const dailyKitchenMinutes = {}
   const dailyKitchenTotals = {}
   let totalSeconds = 0
   let totalSamples = 0
   for (const date of eachDay(start, end)) {
-    const options = { date, token, signal, cacheScope }
-    const sales = await loadCompetitionSource(CATEGORIES.faturamento, summarizeCompetitionSales, {
-      ...options, fresh: freshSales && date === end,
+    const { seconds, samples } = await loadCompetitionSource(CATEGORIES.cozinha, summarizeCompetitionHistories, {
+      date, token, signal, cacheScope, fresh: fresh && date === end,
     })
-    let seconds = 0
-    let samples = 0
-    if (sales.ids.size > 0) {
-      const durations = await loadCompetitionSource(CATEGORIES.cozinha, summarizeCompetitionHistories, {
-        ...options, fresh: fresh && date === end,
-      })
-      for (const id of sales.ids) {
-        const duration = durations.get(id)
-        if (duration === undefined) continue
-        seconds += duration
-        samples += 1
-      }
-    }
-    counts.set(date, sales.count)
     dailyKitchenTotals[date] = { seconds, samples }
     if (samples > 0) dailyKitchenMinutes[date] = averageCompetitionMinutes(seconds, samples)
     totalSeconds += seconds
@@ -1102,7 +1074,6 @@ export async function getSaiposCompetitionMetrics({ start, end, token, signal, f
   }
 
   return {
-    counts,
     averageMinutes: averageCompetitionMinutes(totalSeconds, totalSamples),
     dailyKitchenMinutes,
     dailyKitchenTotals,

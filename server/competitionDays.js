@@ -55,7 +55,7 @@ function canRetry(unitId, day, metric) {
   return Date.now() >= (retryTimes.get(dayKey(unitId, day, metric)) ?? 0)
 }
 
-function refreshDayMetric({ unitId, day, token, metric, freshSales = false, signal }) {
+function refreshDayMetric({ unitId, day, token, metric, signal }) {
   const key = dayKey(unitId, day, metric)
   const current = pendingDays.get(key)
   if (current) return current
@@ -68,9 +68,7 @@ function refreshDayMetric({ unitId, day, token, metric, freshSales = false, sign
     if (metric === 'sales') {
       value = await getSaiposCompetitionSales({ ...options, date: day })
     } else {
-      const metrics = await getSaiposCompetitionMetrics({
-        ...options, start: day, end: day, freshSales,
-      })
+      const metrics = await getSaiposCompetitionMetrics({ ...options, start: day, end: day })
       value = metrics.dailyKitchenTotals[day]
     }
     const snapshot = await saveCompetitionSnapshot(unitId, day, metric, { fetchedAt, value })
@@ -90,7 +88,7 @@ function refreshDayMetric({ unitId, day, token, metric, freshSales = false, sign
 export async function loadCompetitionDay({ unitId, day, today, token, kitchenOnly, fresh = false }) {
   const metric = kitchenOnly ? 'kitchen' : 'sales'
   const snapshot = await readCompetitionSnapshot(unitId, day, metric)
-  const refresh = () => refreshDayMetric({ unitId, day, token, metric, freshSales: fresh })
+  const refresh = () => refreshDayMetric({ unitId, day, token, metric })
   const stale = isStale(snapshot, day, today, shiftIsoDate(today, -1), metric, Date.now())
   if (snapshot && !fresh) {
     return { snapshot, stale, refresh: stale && canRetry(unitId, day, metric) ? refresh : null }
@@ -151,12 +149,10 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, ki
     if (!kitchenOnly && (salesStale || (forceDay && sales))) stale = true
     if (kitchenStale || (forceDay && kitchen)) stale = true
 
-    const loadSales = (!kitchenOnly || !sales) && (forceDay || ((!sales || salesStale) && canRetry(unitId, day, 'sales')))
+    const loadSales = !kitchenOnly && (forceDay || ((!sales || salesStale) && canRetry(unitId, day, 'sales')))
     const loadKitchen = forceDay || ((!kitchen || kitchenStale) && canRetry(unitId, day, 'kitchen'))
     if (loadSales) work.sales.push({ day, forceDay, priority: forceDay ? 0 : sales ? 2 : 1, fetchedAt: sales?.fetchedAt ?? 0 })
-    if (loadKitchen && (sales || loadSales)) {
-      work.kitchen.push({ day, forceDay, priority: forceDay ? 0 : kitchen ? 2 : 1, fetchedAt: kitchen?.fetchedAt ?? 0 })
-    }
+    if (loadKitchen) work.kitchen.push({ day, forceDay, priority: forceDay ? 0 : kitchen ? 2 : 1, fetchedAt: kitchen?.fetchedAt ?? 0 })
   }
 
   const salesReady = coverage.salesDays === coverage.totalDays
@@ -192,24 +188,17 @@ function fillDays({ unitId, token, work, fresh, now }) {
   const signal = AbortSignal.timeout(FILL_BUDGET_MS)
   const task = (async () => {
     if (!await claimMonthlyFill(unitId) || signal.aborted) return
-    const failedSales = new Set()
-    const refreshedSales = new Set()
-    // As vendas podem ficar completas mesmo quando a consulta de histórico está indisponível.
     for (const metric of ['sales', 'kitchen']) {
       for (const { day, forceDay, fetchedAt } of work[metric].slice(0, FILL_METRIC_BATCH_SIZE)) {
         if (signal.aborted) return
-        if (failedSales.has(day)) continue
         try {
           const recent = await readCompetitionSnapshot(unitId, day, metric, 0)
           const lastSeen = forceDay ? now : fetchedAt
           if (!recent || recent.fetchedAt <= lastSeen) {
-            const freshSales = metric === 'kitchen' && forceDay && !refreshedSales.has(day)
-            await refreshDayMetric({ unitId, token, day, metric, freshSales, signal })
+            await refreshDayMetric({ unitId, token, day, metric, signal })
           }
-          if (metric === 'sales') refreshedSales.add(day)
         } catch {
-          // O histórico depende das vendas deste dia. Os demais dias podem continuar.
-          if (metric === 'sales') failedSales.add(day)
+          // Uma métrica indisponível não impede os demais dias e métricas.
         }
       }
     }

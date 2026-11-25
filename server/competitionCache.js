@@ -1,7 +1,8 @@
 import { getCache } from '@vercel/functions'
 
 const cache = getCache({ namespace: 'panela-velha-competition-days' })
-const CACHE_VERSION = 'v2'
+// A versão também define a semântica: v3 replica vendas e passagens de Cozinha da Saipos.
+const CACHE_VERSION = 'v3'
 const RETENTION_SECONDS = 35 * 24 * 60 * 60
 const LOCAL_READ_TTL_MS = 5_000
 const LOCAL_LIMIT = 256

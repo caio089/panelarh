@@ -27,9 +27,7 @@ export function getSaiposCompetitionSales(options: CompetitionSourceOptions & { 
 export function getSaiposCompetitionMetrics(options: CompetitionSourceOptions & {
   start: string
   end: string
-  freshSales?: boolean
 }): Promise<{
-  counts: Map<string, number>
   averageMinutes: number | null
   dailyKitchenMinutes: Record<string, number>
   dailyKitchenTotals: Record<string, { seconds: number; samples: number }>

@@ -18,6 +18,16 @@ function kitchenHistory(id, seconds) {
   }
 }
 
+function kitchenHistoryWithDurations(id, durations) {
+  return {
+    id_sale: id,
+    histories: durations.flatMap((seconds, index) => [
+      { order: index * 2 + 1, desc_store_sale_status: 'Cozinha', duration_time_seconds: seconds },
+      { order: index * 2 + 2, desc_store_sale_status: 'Aguardando Entrega', duration_time_seconds: 30 },
+    ]),
+  }
+}
+
 function mockSaipos(t, rowsFor, now = '2026-11-02T23:00:00Z') {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(now) })
   const background = []
@@ -72,7 +82,7 @@ async function request(query) {
   return result
 }
 
-test('o diário pagina vendas e histórico completos e conta cada venda elegível uma vez', async (t) => {
+test('o diário pagina tudo, conta vendas não canceladas e replica as passagens de Cozinha', async (t) => {
   const orderCount = 1250
   const sales = Array.from({ length: orderCount }, (_, index) => sale(index + 1, index % 2 ? 3 : 1))
   const histories = sales.map((row) => kitchenHistory(row.id_sale, row.id_sale <= 600 ? 600 : 3000))
@@ -80,12 +90,27 @@ test('o diário pagina vendas e histórico completos e conta cada venda elegíve
   histories.push(histories[0], kitchenHistory(1251, 600), kitchenHistory(1253, 1200))
   mockSaipos(t, (path) => path.endsWith('/search_sales') ? sales : histories)
 
-  const query = { unidade: 'dirceu', dia: '2026-11-01', periodo: 'dia' }
+  const query = { unidade: 'dirceu', dia: '2026-10-27', periodo: 'dia' }
   const [volume, kitchen] = await Promise.all([request(query), request({ ...query, dados: 'cozinha' })])
   assert.equal(volume.status, 200)
-  assert.equal(volume.body.unit.orders, orderCount)
+  assert.equal(volume.body.unit.orders, orderCount + 2)
   assert.equal(kitchen.status, 200)
   assert.equal(kitchen.body.unit.kitchenMinutes, 30.8)
+})
+
+test('o tempo usa cada passagem por Cozinha sem somar reentradas por venda', async (t) => {
+  const sales = [sale(1), sale(2, 2), sale(3, 4), sale(4, 3), sale(5, 1, 'Y')]
+  const histories = [
+    kitchenHistoryWithDurations(1, [600, 1200]),
+    kitchenHistory(2, 600),
+    kitchenHistory(5, 1800),
+  ]
+  mockSaipos(t, (path) => path.endsWith('/search_sales') ? sales : histories)
+
+  const query = { unidade: 'dirceu', dia: '2026-11-01', periodo: 'dia' }
+  const [volume, kitchen] = await Promise.all([request(query), request({ ...query, dados: 'cozinha' })])
+  assert.equal(volume.body.unit.orders, 4)
+  assert.equal(kitchen.body.unit.kitchenMinutes, 17.5)
 })
 
 test('o botão de atualizar recarrega o turno anterior e incorpora vendas lançadas depois', async (t) => {
@@ -149,7 +174,7 @@ test('o null de vendas encerra a paginação e completa o mês com o dia sem mov
   assert.deepEqual(ranking.body.coverage, { totalDays: 2, salesDays: 2, kitchenDays: 2 })
   assert.deepEqual(ranking.body.days, [
     { date: '2026-12-01', orders: 300, kitchenMinutes: 10 },
-    { date: '2026-12-02', orders: 0, kitchenMinutes: null },
+    { date: '2026-12-02', orders: 0, kitchenMinutes: 10 },
   ])
   assert.ok(seen.some(([date, offset]) => date === '2026-12-01' && offset === 300))
 })

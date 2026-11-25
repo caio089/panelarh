@@ -459,7 +459,7 @@ function CompetitionDashboard() {
           <section className="grid min-h-0 flex-1 grid-cols-2 gap-5">
             <RankingCard
               title={period === 'mes' ? 'Vendas no mês' : 'Vendas em tempo real'}
-              subtitle={`Mesa e delivery no ${periodLabel}`}
+              subtitle={`Todas as vendas no ${periodLabel}`}
               icon={<Trophy size={24} />}
               units={salesRanking}
               showPoints={false}
@@ -467,7 +467,7 @@ function CompetitionDashboard() {
             />
             <RankingCard
               title={period === 'mes' ? 'Tempo médio no mês' : 'Tempo médio em tempo real'}
-              subtitle={`Cozinha de mesa e delivery no ${periodLabel}`}
+              subtitle={`Status Cozinha da Saipos no ${periodLabel}`}
               icon={<Clock3 size={24} />}
               units={kitchenRanking}
               type="kitchen"
@@ -568,11 +568,11 @@ function TvUnitDashboard({ unitId, unitName }: { unitId: string; unitName: strin
             <CompactOrderList orders={activeOrders} empty="Nenhum pedido em preparo" />
           </TvPanel>
 
-          <TvPanel title="Tempo médio" subtitle={`${periodLabel} · mesa e delivery`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+          <TvPanel title="Tempo médio" subtitle={`${periodLabel} · status Cozinha da Saipos`} icon={<Clock3 size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
             <CompactRanking units={kitchenRanking} type="kitchen" highlight={unitName} />
           </TvPanel>
 
-          <TvPanel title="Vendas" subtitle={`${periodLabel} · mesa e delivery`} icon={<Trophy size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
+          <TvPanel title="Vendas" subtitle={`${periodLabel} · todos os tipos, sem canceladas`} icon={<Trophy size={20} />} badge={period === 'dia' ? 'DIA' : 'MÊS'}>
             <CompactRanking units={salesRanking} type="sales" highlight={unitName} />
           </TvPanel>
 
@@ -662,8 +662,8 @@ function CompetitionRankingPanel({ scores, salesRanking, kitchenRanking, periodL
       </article>
 
       <div className="mt-5 grid grid-cols-2 gap-5">
-        <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Mesa e delivery" icon={<Trophy size={20} />} units={salesRanking} showPoints={periodLabel === 'dia'} />
-        <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Cozinha de mesa e delivery" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" showPoints={periodLabel === 'dia'} />
+        <RankingCard title={`Vendas do ${periodLabel}`} subtitle="Todos os tipos, sem canceladas" icon={<Trophy size={20} />} units={salesRanking} showPoints={periodLabel === 'dia'} />
+        <RankingCard title={`Rapidez no ${periodLabel}`} subtitle="Status Cozinha da Saipos" icon={<Clock3 size={20} />} units={kitchenRanking} type="kitchen" showPoints={periodLabel === 'dia'} />
       </div>
     </section>
   )
