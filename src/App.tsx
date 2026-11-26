@@ -24,6 +24,7 @@ import { canonicalTvPath, TvCompetitionPage } from '@/pages/TvCompetitionPage'
 import { PeopleOpsPage } from '@/pages/PeopleOpsPage'
 import { CollaboratorsPage } from '@/pages/CollaboratorsPage'
 import { CollaboratorPortalPage } from '@/pages/CollaboratorPortalPage'
+import { TimeReportsPage } from '@/pages/TimeReportsPage'
 
 function UnknownRoute() {
   const { pathname, search, hash } = useLocation()
@@ -63,7 +64,7 @@ export default function App() {
                 <Route path="colaboradores" element={<UnitCollaboratorsTab />} />
                 <Route path="escala" element={<UnitScheduleTab />} />
               </Route>
-              <Route path="ponto" element={<Navigate to="/admin" replace />} />
+              <Route path="ponto" element={<TimeReportsPage />} />
               <Route path="gerentes" element={<ManagersPage />} />
               <Route path="rh" element={<AdminDashboardPage />} />
               <Route path="pessoas" element={<PeopleOpsPage />} />

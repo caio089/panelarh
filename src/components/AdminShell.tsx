@@ -13,6 +13,7 @@ import {
   PieChart,
   KeyRound,
   HeartHandshake,
+  FileClock,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -48,6 +49,7 @@ const STATIC_GROUPS: NavGroup[] = [
     title: 'RH',
     items: [
       { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
+      { to: '/admin/ponto', label: 'Ponto e horas', icon: FileClock },
       { to: '/admin/rh', label: 'Painel de vagas', icon: PieChart },
     ],
   },
@@ -77,6 +79,7 @@ const RH_GROUPS: NavGroup[] = [
     title: 'Pessoas e acesso',
     items: [
       { to: '/admin/colaboradores', label: 'Colaboradores', icon: Users },
+      { to: '/admin/ponto', label: 'Ponto e horas', icon: FileClock },
       { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
       { to: '/admin/acesso', label: 'Acesso do RH', icon: KeyRound },
     ],

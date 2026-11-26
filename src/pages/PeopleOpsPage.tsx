@@ -171,7 +171,7 @@ function DpArea() {
         label="Departamento pessoal"
         title="Falta, atestado, advertência e documento"
         description="Abra a pessoa e registre falta, atestado, advertência ou documento na ficha."
-        links={[{ to: '/admin/colaboradores', label: 'Abrir colaboradores' }]}
+        links={[{ to: '/admin/colaboradores', label: 'Abrir colaboradores' }, { to: '/admin/ponto', label: 'Abrir ponto e horas' }]}
       />
     </div>
   )
