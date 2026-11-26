@@ -61,10 +61,16 @@ function ScheduleEditor({
   weekStart: string
   onWeekChange: (week: string) => void
 }) {
-  const { colaboradores, getEscala, saveEscala } = useGestaoStore()
+  const { getEscala, saveEscala } = useGestaoStore()
+  const { collaborators, collaboratorsLoading, collaboratorsError } = useUnitContext()
   const team = useMemo(
-    () => colaboradores.filter((c) => c.unitId === unitId && c.status === 'ativo'),
-    [colaboradores, unitId],
+    () => collaborators.filter((c) => c.status === 'ativo').map((c): Colaborador => ({
+      id: c.id, unitId, nome: c.full_name, cargo: c.job_title,
+      admissao: '', entradaPrevista: '',
+      isGerente: /gerente/i.test(c.job_title), status: c.status,
+      telefone: '', turnoPreferido: 'flexivel', folgaPreferida: null,
+    })),
+    [collaborators, unitId],
   )
   const saved = getEscala(unitId, weekStart)
   const previousWeek = getEscala(unitId, shiftWeek(weekStart, -1))
@@ -182,6 +188,8 @@ function ScheduleEditor({
 
   return (
     <div className="space-y-5">
+      <p className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white/75">Equipe sincronizada do cadastro do RH. A escala é um rascunho salvo neste navegador; turnos e preferências ainda não são enviados ao banco.</p>
+      {collaboratorsError ? <p role="alert" className="rounded-xl bg-[#5A2A29] px-4 py-3 text-sm text-white">{collaboratorsError}</p> : null}
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--pv-surface)] p-4 shadow-xl">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => onWeekChange(shiftWeek(weekStart, -1))} aria-label="Semana anterior">
@@ -289,7 +297,7 @@ function ScheduleEditor({
 
           {team.length === 0 ? (
             <p className="py-10 text-center text-sm text-[var(--pv-muted)]">
-              Nenhum colaborador ativo nesta unidade. Cadastre a equipe na aba Colaboradores.
+              {collaboratorsLoading ? 'Carregando colaboradores do RH…' : 'Nenhum colaborador ativo nesta unidade. Confira a equipe na aba Colaboradores.'}
             </p>
           ) : (
             <ScheduleGrid

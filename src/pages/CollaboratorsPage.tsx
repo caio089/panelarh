@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ArrowLeft, CheckCircle2, Copy, ExternalLink, FileText, Link2, LogIn, Pencil, Plus, RefreshCw, Search, Trash2, UserRound } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Field, Input, Modal, PageHeader, Select, Textarea } from '@/components/ui'
 import { ConfirmDialog } from '@/features/gestao/components/ConfirmDialog'
 import { formatDateBR } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
+import { AdminCollaboratorsPage } from './AdminCollaboratorsPage'
 import {
   clearRhHistory,
   createRhCollaborator,
@@ -65,8 +66,14 @@ const DOCUMENT_LABEL: Record<string, string> = {
 const today = () => new Date().toISOString().slice(0, 10)
 
 export function CollaboratorsPage() {
+  const { isAdmin } = useAuth()
+  return isAdmin ? <AdminCollaboratorsPage /> : <RhCollaboratorsPage />
+}
+
+function RhCollaboratorsPage() {
   const { signOut } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [units, setUnits] = useState<RhUnit[]>([])
   const [collaborators, setCollaborators] = useState<RhCollaborator[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -81,7 +88,7 @@ export function CollaboratorsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [mode, setMode] = useState<FormMode | null>(null)
   const [filter, setFilter] = useState('')
-  const [unitFilter, setUnitFilter] = useState('todas')
+  const [unitFilter, setUnitFilter] = useState(() => searchParams.get('unidade') || 'todas')
   const [editing, setEditing] = useState<CollaboratorHistoryEvent | null>(null)
   const [deleting, setDeleting] = useState<CollaboratorHistoryEvent | null>(null)
   const [clearing, setClearing] = useState(false)

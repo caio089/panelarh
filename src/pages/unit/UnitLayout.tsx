@@ -1,9 +1,9 @@
 import { Link, Navigate, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, CalendarDays, LayoutDashboard, Users } from 'lucide-react'
 import { useData } from '@/contexts/DataContext'
 import { cn } from '@/lib/utils'
-import { useGestaoStore } from '@/features/gestao/GestaoStoreContext'
-import { Avatar } from '@/features/gestao/components/atoms'
+import { loadAdminUnitPeople, type AdminUnitPerson } from '@/lib/adminPeopleDb'
 import type { UnitOutletContext } from './unitContext'
 
 const TABS = [
@@ -17,14 +17,25 @@ export function UnitLayout() {
   const { unitId = '' } = useParams()
   const { pathname } = useLocation()
   const { store } = useData()
-  const { colaboradores } = useGestaoStore()
   const unit = store.units.find((u) => u.id === unitId)
+  const unitName = unit?.name
+  const [people, setPeople] = useState<AdminUnitPerson[]>([])
+  const [collaboratorsLoading, setCollaboratorsLoading] = useState(true)
+  const [collaboratorsError, setCollaboratorsError] = useState('')
+  const reloadCollaborators = useCallback(async () => {
+    setCollaboratorsLoading(true)
+    setCollaboratorsError('')
+    setPeople([])
+    try { setPeople(unitName ? (await loadAdminUnitPeople(unitName)).people : []) }
+    catch (reason) { setCollaboratorsError(reason instanceof Error ? reason.message : 'Não foi possível carregar a equipe.') }
+    finally { setCollaboratorsLoading(false) }
+  }, [unitName])
+  useEffect(() => { void reloadCollaborators() }, [reloadCollaborators])
 
   if (!unit) return <Navigate to="/admin" replace />
 
-  const team = colaboradores.filter((c) => c.unitId === unit.id)
+  const team = people
   const activeCount = team.filter((c) => c.status === 'ativo').length
-  const gerente = team.find((c) => c.isGerente && c.status === 'ativo')
   const currentTab = TABS.find((t) => t.path && pathname.endsWith(`/${t.path}`))?.path ?? ''
   const base = `/admin/unidade/${unit.id}`
 
@@ -42,16 +53,8 @@ export function UnitLayout() {
           <p className="pv-eyebrow">Unidade</p>
           <h1 className="font-display text-3xl text-[#F7F4EC] sm:text-4xl">{unit.name}</h1>
           <div className="mt-3 flex items-center gap-2">
-            {gerente ? <Avatar name={gerente.nome} size={28} /> : null}
             <p className="text-sm text-[var(--pv-cream)]/80">
-              {gerente ? (
-                <>
-                  <span className="font-semibold text-white">{gerente.nome}</span> · gerente ·{' '}
-                </>
-              ) : (
-                'Sem gerente cadastrado · '
-              )}
-              {activeCount} colaboradores ativos
+              {collaboratorsLoading ? 'Carregando equipe…' : collaboratorsError ? 'Equipe indisponível' : `${activeCount} colaboradores ativos`}
             </p>
           </div>
         </div>
@@ -94,7 +97,7 @@ export function UnitLayout() {
       </nav>
 
       <div className="mt-6">
-        <Outlet context={{ unitId: unit.id, unitName: unit.name } satisfies UnitOutletContext} />
+        <Outlet context={{ unitId: unit.id, unitName: unit.name, collaborators: team, collaboratorsLoading, collaboratorsError, reloadCollaborators } satisfies UnitOutletContext} />
       </div>
     </div>
   )
