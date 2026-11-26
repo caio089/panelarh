@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FileClock, Upload } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Upload } from 'lucide-react'
 import { PageHeader } from '@/components/ui'
 import { listRhCollaborators, listRhUnits, type RhCollaborator, type RhUnit } from '@/lib/collaboratorsDb'
-import { formatMinutes, lateness, normalizeName, parseTimeReport, type ParsedReport, type ReportPerson } from '@/lib/timeReports'
+import { formatMinutes, lateness, normalizeName, parseTimeReport, type ParsedReport } from '@/lib/timeReports'
 import { listTimeReports, saveTimeReport, type SavedTimeReport } from '@/lib/timeReportsDb'
 
 const brDate = (date: string) => date ? date.split('-').reverse().join('/') : '—'
 const periodLabel = (from: string, to: string) => `${brDate(from)} a ${brDate(to)}`
-function dataForWeek(people: ReportPerson[], tolerance: number) {
-  const days = people.flatMap((person) => person.days)
-  const worked = days.reduce((sum, day) => sum + (day.workedMinutes ?? 0), 0)
-  const late = days.map((day) => lateness(day, tolerance)).filter((value): value is number => value !== null && value > 0)
-  return { worked, lateCount: late.length, lateMinutes: late.reduce((sum, value) => sum + value, 0), pending: days.filter((day) => day.status !== 'ok').length }
-}
 export function TimeReportsPage() {
   const [units, setUnits] = useState<RhUnit[]>([])
   const [collaborators, setCollaborators] = useState<RhCollaborator[]>([])
@@ -26,7 +19,7 @@ export function TimeReportsPage() {
   const [notice, setNotice] = useState('')
   const [tolerance, setTolerance] = useState(0)
   const [weekId, setWeekId] = useState('')
-  const [detailId, setDetailId] = useState<string | null>(null)
+  const [date, setDate] = useState('')
   useEffect(() => {
     void Promise.all([listRhUnits(), listRhCollaborators()]).then(([nextUnits, nextPeople]) => {
       setUnits(nextUnits || []); setCollaborators(nextPeople || [])
@@ -42,6 +35,8 @@ export function TimeReportsPage() {
   const unitPeople = useMemo(() => collaborators.filter((person) => person.unit_id === unitId), [collaborators, unitId])
   const weeks = reports.filter((report) => report.kind === 'espelho')
   const week = weeks.find((report) => report.id === weekId) ?? weeks[0]
+  const dates = [...new Set(week?.people.flatMap((person) => person.days.map((day) => day.date)) ?? [])].sort()
+  const selectedDate = dates.includes(date) ? date : dates.at(-1) ?? ''
   const banks = reports.filter((report) => report.kind === 'banco')
   const balances = new Map<string, { balance: number; period: string }>()
   for (const bank of banks) for (const person of bank.people) {
@@ -50,14 +45,10 @@ export function TimeReportsPage() {
   }
   const rows = unitPeople.map((collaborator) => {
     const person = week?.people.find((item) => item.collaboratorId === collaborator.id)
-    return { collaborator, person, stats: dataForWeek(person ? [person] : [], tolerance), bank: balances.get(collaborator.id) }
-  }).filter((row) => row.person || row.bank)
-  const totals = dataForWeek(week?.people.filter((person) => person.collaboratorId) ?? [], tolerance)
-  const balanceValues = banks[0]?.people.filter((person) => person.collaboratorId).map((person) => person.balanceMinutes ?? 0) ?? []
-  const totalCredit = balanceValues.filter((value) => value > 0).reduce((sum, value) => sum + value, 0)
-  const totalDebit = balanceValues.filter((value) => value < 0).reduce((sum, value) => sum + value, 0)
+    const day = person?.days.find((item) => item.date === selectedDate)
+    return { collaborator, day, bank: balances.get(collaborator.id) }
+  }).filter((row) => row.day || row.bank)
   const unmatched = week?.people.filter((person) => !person.collaboratorId) ?? []
-  const selected = rows.find((row) => row.collaborator.id === detailId)
   async function openFile(file?: File) {
     if (!file) return
     if (!unitId) { setError('Selecione a unidade antes de importar.'); return }
@@ -95,7 +86,7 @@ export function TimeReportsPage() {
     finally { setBusy(false) }
   }
   return <div className="px-5 py-6 sm:px-8 sm:py-8">
-    <PageHeader eyebrow="Departamento Pessoal" title="Ponto e banco de horas" description="Importe o espelho de ponto semanal e o extrato do banco de horas emitidos pelo sistema. Confira atrasos, horas realizadas e saldos oficiais por pessoa." />
+    <PageHeader eyebrow="Departamento Pessoal" title="Ponto e banco de horas" description="Veja a hora de chegada, se houve atraso e o saldo do banco de horas de cada pessoa." />
     <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
       <section className="rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
         <h2 className="font-display text-xl text-[var(--pv-ink)]">Importar relatório</h2>
@@ -112,12 +103,11 @@ export function TimeReportsPage() {
         <p className="mt-3 text-xs text-[var(--pv-muted)]">Um novo envio para a mesma unidade, tipo e período substitui a importação anterior.</p>
       </section>
       <section className="rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
-        <h2 className="font-display text-xl text-[var(--pv-ink)]">Critérios de conferência</h2>
-        <label className="mt-4 block text-xs font-bold text-[var(--pv-ink)]">Tolerância de atraso para esta visualização (minutos)
+        <h2 className="font-display text-xl text-[var(--pv-ink)]">Atrasos</h2>
+        <label className="mt-4 block text-xs font-bold text-[var(--pv-ink)]">Tolerância em minutos
           <input type="number" min="0" max="60" value={tolerance} onChange={(event) => setTolerance(Math.max(0, Math.min(60, Number(event.target.value) || 0)))} className="mt-1 w-28 rounded-xl border border-[var(--pv-line)] bg-white p-2.5 text-sm" />
         </label>
-        <p className="mt-4 text-xs leading-relaxed text-[var(--pv-muted)]">Atraso = entrada realizada após o horário contratual do espelho, descontada a tolerância escolhida. Dia sem batida ou jornada incompleta fica pendente de conferência; não vira falta ou débito automaticamente.</p>
-        <p className="mt-2 text-xs leading-relaxed text-[var(--pv-muted)]">O saldo do banco vem do extrato do sistema e já incorpora seus lançamentos. As horas do espelho não são somadas novamente ao saldo. Saldo positivo indica crédito a analisar para compensação ou pagamento; saldo negativo requer conferência com o DP.</p>
+        <p className="mt-4 text-xs leading-relaxed text-[var(--pv-muted)]">A entrada é comparada com o horário previsto no espelho. Sem entrada válida, o atraso aparece como “—”. O banco de horas mostra o saldo do último extrato enviado.</p>
       </section>
     </div>
     {error && <p role="alert" className="mt-4 rounded-xl bg-red-100 p-3 text-sm text-red-800">{error}</p>}
@@ -125,7 +115,7 @@ export function TimeReportsPage() {
     {preview && <section className="mt-5 rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
       <h2 className="font-display text-xl text-[var(--pv-ink)]">Conferir antes de salvar</h2>
       <p className="mt-1 text-sm text-[var(--pv-muted)]">{preview.kind === 'espelho' ? 'Espelho semanal' : 'Banco de horas'} · {periodLabel(preview.from, preview.to)} · {preview.company} · {preview.people.length} pessoas</p>
-      <p className="mt-2 text-xs text-[var(--pv-muted)]">Associe os nomes sem correspondência. Pessoas não vinculadas ficam no relatório, mas não entram nos totais individuais.</p>
+      <p className="mt-2 text-xs text-[var(--pv-muted)]">Associe os nomes sem correspondência. Pessoas não vinculadas não aparecem na tabela de ponto.</p>
       <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
         {preview.people.map((person, index) => <div key={`${person.sourceName}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--pv-line)] bg-white p-2.5 text-sm">
           <span className="font-semibold text-[var(--pv-ink)]">{person.sourceName}</span>
@@ -137,25 +127,19 @@ export function TimeReportsPage() {
       <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => void save()} className="rounded-xl bg-[var(--pv-terracotta)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Salvar importação</button><button type="button" onClick={() => setPreview(null)} className="rounded-xl border border-[var(--pv-line)] px-4 py-2 text-sm font-bold text-[var(--pv-ink)]">Cancelar</button></div>
     </section>}
     <section className="mt-5 rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl text-[var(--pv-ink)]">Conferência semanal</h2><p className="text-xs text-[var(--pv-muted)]">{week ? `${periodLabel(week.period_from, week.period_to)} · ${week.company_name}` : 'Nenhum espelho importado para esta unidade.'}</p></div>
-        {weeks.length > 0 && <select aria-label="Semana" value={week?.id ?? ''} onChange={(event) => { setWeekId(event.target.value); setDetailId(null) }} className="rounded-xl border border-[var(--pv-line)] bg-white p-2 text-sm">{weeks.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.period_from, item.period_to)}</option>)}</select>}
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl text-[var(--pv-ink)]">Chegadas e banco de horas</h2><p className="text-xs text-[var(--pv-muted)]">{week ? `${periodLabel(week.period_from, week.period_to)} · ${week.company_name}` : 'Nenhum espelho importado para esta unidade.'}</p></div>
+        <div className="flex flex-wrap gap-2">
+          {weeks.length > 0 && <select aria-label="Semana" value={week?.id ?? ''} onChange={(event) => { setWeekId(event.target.value); setDate('') }} className="rounded-xl border border-[var(--pv-line)] bg-white p-2 text-sm">{weeks.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.period_from, item.period_to)}</option>)}</select>}
+          {dates.length > 0 && <select aria-label="Dia" value={selectedDate} onChange={(event) => setDate(event.target.value)} className="rounded-xl border border-[var(--pv-line)] bg-white p-2 text-sm">{dates.map((item) => <option key={item} value={item}>{brDate(item)}</option>)}</select>}
+        </div>
       </div>
-      {(week || banks.length > 0) && <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <Metric label="Horas realizadas" value={formatMinutes(totals.worked)} />
-        <Metric label="Entradas atrasadas" value={String(totals.lateCount)} />
-        <Metric label="Minutos de atraso" value={formatMinutes(totals.lateMinutes)} />
-        <Metric label="Dias para conferir" value={String(totals.pending)} />
-        <Metric label="Créditos no último extrato" value={banks.length ? formatMinutes(totalCredit) : '—'} />
-        <Metric label="Débitos no último extrato" value={banks.length ? formatMinutes(totalDebit) : '—'} />
-      </div>}
       {unmatched.length > 0 && <p className="mt-4 rounded-xl bg-amber-100 p-3 text-xs text-amber-900">{unmatched.length} nome(s) do espelho sem vínculo: {unmatched.map((person) => person.sourceName).join(', ')}. Reimporte o período para corrigir.</p>}
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead><tr className="border-b border-[var(--pv-line)] text-xs text-[var(--pv-muted)]"><th className="py-2">Colaborador</th><th>Realizadas</th><th>Atrasos</th><th>Pendências</th><th>Saldo oficial</th><th>Leitura do saldo</th></tr></thead><tbody>
-        {rows.map(({ collaborator, person, stats, bank }) => <tr key={collaborator.id} className="border-b border-[var(--pv-line)] text-[var(--pv-ink)]"><td className="py-3"><button className="text-left font-bold text-[var(--pv-terracotta)] hover:underline" onClick={() => setDetailId(detailId === collaborator.id ? null : collaborator.id)}>{collaborator.full_name}</button><span className="block text-xs text-[var(--pv-muted)]">{collaborator.job_title}</span></td><td>{person ? formatMinutes(stats.worked) : '—'}</td><td>{person ? `${stats.lateCount} · ${formatMinutes(stats.lateMinutes)}` : '—'}</td><td>{person ? stats.pending : '—'}</td><td className="font-bold">{formatMinutes(bank?.balance ?? null, true)}{bank && <span className="block text-[10px] font-normal text-[var(--pv-muted)]">{bank.period}</span>}</td><td>{bank ? bank.balance > 0 ? 'Crédito a analisar' : bank.balance < 0 ? 'Débito a conferir' : 'Zerado' : 'Sem extrato'}</td></tr>)}
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm"><thead><tr className="border-b border-[var(--pv-line)] text-xs text-[var(--pv-muted)]"><th className="py-2">Colaborador</th><th>Chegou às</th><th>Atrasou?</th><th>Banco de horas</th></tr></thead><tbody>
+        {rows.map(({ collaborator, day, bank }) => {
+          const delay = day ? lateness(day, tolerance) : null
+          return <tr key={collaborator.id} className="border-b border-[var(--pv-line)] text-[var(--pv-ink)]"><td className="py-3"><span className="font-bold">{collaborator.full_name}</span><span className="block text-xs text-[var(--pv-muted)]">{collaborator.job_title}</span></td><td className="font-semibold">{day?.entry ?? '—'}</td><td>{delay === null ? <span className="text-[var(--pv-muted)]">—</span> : delay > 0 ? <span className="font-bold text-[var(--pv-terracotta)]">Sim</span> : <span className="font-bold text-[var(--pv-success)]">Não</span>}</td><td className="font-bold">{formatMinutes(bank?.balance ?? null, true)}{bank && <span className="block text-[10px] font-normal text-[var(--pv-muted)]">{bank.period}</span>}</td></tr>
+        })}
       </tbody></table>{rows.length === 0 && <p className="py-6 text-sm text-[var(--pv-muted)]">Ainda não há dados vinculados. Importe os relatórios e confira os nomes.</p>}</div>
-      {selected?.person && <div className="mt-5 rounded-xl bg-[#F7F4EC] p-4"><h3 className="font-bold text-[var(--pv-ink)]">{selected.collaborator.full_name} · dias do espelho</h3><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[580px] text-left text-xs"><thead><tr><th>Data</th><th>Batidas originais</th><th>Entrada / prevista</th><th>Trabalhadas</th><th>Atraso</th><th>Conferência</th></tr></thead><tbody>{selected.person.days.map((day) => <tr key={day.date} className="border-t border-[var(--pv-line)]"><td className="py-2">{brDate(day.date)}</td><td>{day.punches.join(' · ') || '—'}</td><td>{day.entry ?? '—'} / {day.expectedEntry ?? '—'}</td><td>{formatMinutes(day.workedMinutes)}</td><td>{lateness(day, tolerance) === null ? '—' : formatMinutes(lateness(day, tolerance))}</td><td>{day.status === 'ok' ? 'OK' : day.status === 'incompleto' ? 'Batida incompleta' : 'Sem batida'}</td></tr>)}</tbody></table></div></div>}
-      {banks.length > 0 && <p className="mt-4 text-xs text-[var(--pv-muted)]">Saldo oficial mais recente por colaborador; o extrato pode cobrir um período diferente da semana selecionada. Confira o período antes de decidir pagamento.</p>}
     </section>
-    <Link to="/admin/colaboradores" className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[var(--pv-cream)]"><FileClock size={16} /> Abrir cadastro de colaboradores</Link>
   </div>
 }
-function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-[#F7F4EC] p-3"><p className="text-xs font-semibold text-[var(--pv-muted)]">{label}</p><p className="mt-1 font-display text-2xl text-[var(--pv-ink)]">{value}</p></div> }
