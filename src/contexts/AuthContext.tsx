@@ -19,6 +19,8 @@ import {
   type DemoUser,
 } from '@/lib/demo/auth'
 import { clearRhSession, startRhSession } from '@/lib/rhAccess'
+import { clearAdminSession, startAdminSession } from '@/lib/adminOverviewDb'
+import { DEMO_ADMIN_EMAIL } from '@/lib/demo/auth'
 
 interface AuthContextValue {
   user: DemoUser | null
@@ -44,11 +46,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [rhEmail, setRhEmail] = useState(rememberedRhEmail)
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const admin = findDemoAccount(email, password)
-    if (admin?.profile.role === 'admin') {
-      startDemoSession(admin.user.id)
-      setSessionId(admin.user.id)
-      return {}
+    if (email.trim().toLowerCase() === DEMO_ADMIN_EMAIL) {
+      try {
+        await startAdminSession(email, password)
+        startDemoSession('demo-admin')
+        setSessionId('demo-admin')
+        return {}
+      } catch (reason) {
+        return { error: reason instanceof Error ? reason.message : 'Não foi possível entrar no painel.' }
+      }
     }
 
     const remoteSession = await startRhSession(email, password)
@@ -75,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     clearRhSession()
+    clearAdminSession()
     endDemoSession()
     setSessionId(null)
   }, [])

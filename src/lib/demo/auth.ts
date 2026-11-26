@@ -1,8 +1,8 @@
 import type { Profile } from '@/types'
+import { adminSessionToken } from '@/lib/adminOverviewDb'
 
 /** Credenciais fixas do modo demonstração (sem backend; não usar em produção real). */
 export const DEMO_ADMIN_EMAIL = 'admin@panelavelha.com'
-export const DEMO_ADMIN_PASSWORD = 'admin123'
 export const DEMO_RH_EMAIL = 'rh@panelavelha.com'
 export const DEMO_RH_PASSWORD = 'rh123'
 
@@ -50,7 +50,7 @@ export const DEMO_ADMIN_PROFILE: Profile = emptyProfile(DEMO_ADMIN_USER.id, DEMO
 const DEMO_RH_USER: DemoUser = { id: 'demo-rh', email: DEMO_RH_EMAIL }
 
 const ACCOUNTS: DemoAccount[] = [
-  { password: DEMO_ADMIN_PASSWORD, user: DEMO_ADMIN_USER, profile: DEMO_ADMIN_PROFILE },
+  { password: '', user: DEMO_ADMIN_USER, profile: DEMO_ADMIN_PROFILE },
   {
     password: DEMO_RH_PASSWORD,
     user: DEMO_RH_USER,
@@ -60,7 +60,7 @@ const ACCOUNTS: DemoAccount[] = [
 
 export function findDemoAccount(email: string, password: string) {
   const normalized = email.trim().toLowerCase()
-  return ACCOUNTS.find((account) => account.user.email === normalized && account.password === password) ?? null
+  return ACCOUNTS.find((account) => account.profile.role === 'rh' && account.user.email === normalized && account.password === password) ?? null
 }
 
 export function demoAccountById(id: string | null) {
@@ -70,7 +70,7 @@ export function demoAccountById(id: string | null) {
 
 export function currentDemoSessionId() {
   const id = window.localStorage.getItem(SESSION_KEY)
-  return demoAccountById(id) ? id : null
+  return demoAccountById(id) && (id !== 'demo-admin' || adminSessionToken()) ? id : null
 }
 
 function writeStaffCookie(userId: string | null) {

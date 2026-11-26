@@ -1,4 +1,4 @@
-import { ExternalLink, RefreshCw, ShoppingBag, Trophy } from 'lucide-react'
+import { Clock3, ExternalLink, RefreshCw, ShoppingBag, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { usePageVisible } from './usePageVisible'
@@ -16,7 +16,7 @@ const REFRESH_MS = 60_000
 export function CompetitionAdminPanel() {
   const visible = usePageVisible()
   const [date, setDate] = useState(() => competitionDayInFortaleza())
-  const [snapshot, setSnapshot] = useState<{ date: string; orders: Record<string, number>; updatedAt?: string }>()
+  const [snapshot, setSnapshot] = useState<{ date: string; orders: Record<string, number>; kitchen: Record<string, number>; updatedAt?: string }>()
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
@@ -49,21 +49,40 @@ export function CompetitionAdminPanel() {
         onUnit: ({ id, orders }, fields, fetchedAt, stale) => {
           if (controller.signal.aborted || !fields.orders || orders === null) return
           setSnapshot((current) => {
-            const previous = current?.date === date ? current : { date, orders: {} }
+            const previous = current?.date === date ? current : { date, orders: {}, kitchen: {} }
             if (stale && !fetchedAt && previous.orders[id] !== undefined) return previous
             const updatedAt = fetchedAt && (!previous.updatedAt || Date.parse(fetchedAt) > Date.parse(previous.updatedAt))
               ? fetchedAt
               : previous.updatedAt
-            return { date, orders: { ...previous.orders, [id]: orders }, updatedAt }
+            return { ...previous, orders: { ...previous.orders, [id]: orders }, updatedAt }
+          })
+        },
+      })
+      if (controller.signal.aborted) return
+      const kitchenResult = await loadCompetitionUnits({
+        unitIds: COMPETITION_UNIT_IDS,
+        date,
+        period: 'dia',
+        kitchen: true,
+        fresh,
+        signal: controller.signal,
+        onUnit: ({ id, kitchenMinutes }, fields, fetchedAt, stale) => {
+          if (controller.signal.aborted || !fields.kitchen || kitchenMinutes === null) return
+          setSnapshot((current) => {
+            const previous = current?.date === date ? current : { date, orders: {}, kitchen: {} }
+            if (stale && !fetchedAt && previous.kitchen[id] !== undefined) return previous
+            const updatedAt = fetchedAt && (!previous.updatedAt || Date.parse(fetchedAt) > Date.parse(previous.updatedAt))
+              ? fetchedAt : previous.updatedAt
+            return { ...previous, kitchen: { ...previous.kitchen, [id]: kitchenMinutes }, updatedAt }
           })
         },
       })
       if (controller.signal.aborted) return
       completed.current = key
       setLoading(false)
-      if (result.error) setStatus('Uma ou mais unidades estão indisponíveis. Últimos dados do turno em exibição, quando disponíveis.')
-      else if (result.stale) setStatus('Último total disponível em exibição. Use Atualizar para consultar o turno novamente.')
-      else if (result.pending) setStatus('Aguardando os totais do turno.')
+      if (result.error || kitchenResult.error) setStatus('Uma ou mais unidades estão indisponíveis. Últimos dados do turno em exibição, quando disponíveis.')
+      else if (result.stale || kitchenResult.stale) setStatus('Últimos dados disponíveis em exibição. Use Atualizar para consultar o turno novamente.')
+      else if (result.pending || kitchenResult.pending) setStatus('Aguardando vendas ou tempo de preparo do turno.')
       else setStatus('')
     }
 
@@ -82,6 +101,7 @@ export function CompetitionAdminPanel() {
     id,
     ...UNIT_DETAILS[id],
     orders: current?.orders[id] ?? null,
+    kitchenMinutes: current?.kitchen[id] ?? null,
   })).sort((a, b) => (b.orders ?? -1) - (a.orders ?? -1) || a.name.localeCompare(b.name))
   const complete = ranking.every((unit) => unit.orders !== null)
 
@@ -91,7 +111,7 @@ export function CompetitionAdminPanel() {
         <div>
           <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[1.6px] text-[#F4B942]"><Trophy size={13} /> Operação Saipos</p>
           <h2 className="mt-1 font-display text-3xl">Comparativo entre unidades</h2>
-          <p className="mt-1 text-sm text-white/65">Todas as vendas por unidade, sem canceladas, no mesmo recorte da Saipos. Clique para abrir o detalhamento de cada casa.</p>
+          <p className="mt-1 text-sm text-white/65">Vendas sem canceladas e tempo médio de preparo na cozinha, no recorte da Saipos. Clique para abrir cada casa.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-white/50">Turno {date.split('-').reverse().join('/')}{updatedAt ? ` · Atualizado às ${updatedAt}` : ''}</span>
@@ -114,6 +134,7 @@ export function CompetitionAdminPanel() {
               <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-[#F4B942]">{complete ? `#${ranking.findIndex((item) => item.orders === unit.orders) + 1}` : '—'}</span>
             </div>
             <p className="mt-4 inline-flex items-center gap-1.5 font-display text-2xl text-[#F4B942]"><ShoppingBag size={18} /> {unit.orders === null ? '—' : `${unit.orders} vendas`}</p>
+            <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-white/80"><Clock3 size={16} /> Preparo médio: <strong>{unit.kitchenMinutes === null ? '—' : `${unit.kitchenMinutes.toLocaleString('pt-BR')} min`}</strong></p>
             <p className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-[#EFE3C4]">Abrir operação da unidade <ExternalLink size={13} className="transition group-hover:translate-x-0.5" /></p>
           </Link>
         ))}
