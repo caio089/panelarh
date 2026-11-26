@@ -1,6 +1,6 @@
 export const COMPETITION_UNIT_IDS = ['dirceu', 'promorar', 'mocambinho'] as const
 
-export type CompetitionPeriod = 'dia' | 'mes'
+export type CompetitionPeriod = 'dia' | 'mes' | 'intervalo'
 
 export type CompetitionUnitMetric = {
   id: string
@@ -23,6 +23,8 @@ type CompetitionResponse = {
   partial?: boolean
   stale?: boolean
   coverage?: { totalDays: number; salesDays: number; kitchenDays: number }
+  observedOrders?: number | null
+  observedKitchenMinutes?: number | null
   unit?: CompetitionUnitMetric
   days?: CompetitionDayPoint[]
 }
@@ -42,6 +44,8 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function fetchCompetitionUnit({
   unitId,
   date,
+  start,
+  end,
   period = 'dia',
   kitchen = false,
   daily = false,
@@ -50,6 +54,8 @@ export async function fetchCompetitionUnit({
 }: {
   unitId: string
   date?: string
+  start?: string
+  end?: string
   period?: CompetitionPeriod
   kitchen?: boolean
   daily?: boolean
@@ -58,6 +64,8 @@ export async function fetchCompetitionUnit({
 }) {
   const params = new URLSearchParams({ unidade: unitId, periodo: period })
   if (date) params.set('dia', date)
+  if (start) params.set('inicio', start)
+  if (end) params.set('fim', end)
   if (kitchen) params.set('dados', 'cozinha')
   if (daily) params.set('modo', 'diario')
   if (fresh) params.set('atualiza', '1')
@@ -66,7 +74,7 @@ export async function fetchCompetitionUnit({
   if (!response.ok || !payload.unit) {
     throw new Error(payload.error || 'Não foi possível atualizar a unidade.')
   }
-  if ((date && payload.date && payload.date !== date) || (payload.period && payload.period !== period) || payload.unit.id !== unitId) {
+  if ((date && payload.date && payload.date !== date) || (end && payload.date && payload.date !== end) || (payload.period && payload.period !== period) || payload.unit.id !== unitId) {
     throw new Error('A resposta da competição veio com outro período ou unidade.')
   }
   const { coverage } = payload
@@ -75,7 +83,7 @@ export async function fetchCompetitionUnit({
   const kitchenComplete = validCoverage ? coverage.kitchenDays === coverage.totalDays : !payload.partial
   const fields = {
     orders: !kitchen && salesComplete && Number.isFinite(payload.unit.orders),
-    kitchen: (kitchen || period === 'mes') && kitchenComplete,
+    kitchen: (kitchen || period === 'mes' || period === 'intervalo') && kitchenComplete,
   }
   const unit = {
     ...payload.unit,

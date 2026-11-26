@@ -48,6 +48,7 @@ const STATIC_GROUPS: NavGroup[] = [
   {
     title: 'RH',
     items: [
+      { to: '/admin/colaboradores', label: 'Colaboradores', icon: Users },
       { to: '/admin/pessoas', label: 'Central RH e DP', icon: HeartHandshake },
       { to: '/admin/ponto', label: 'Ponto e horas', icon: FileClock },
       { to: '/admin/rh', label: 'Painel de vagas', icon: PieChart },

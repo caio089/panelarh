@@ -48,6 +48,7 @@ function isStale(snapshot, day, today, yesterday, metric, now) {
   const age = now - snapshot.fetchedAt
   if (day === today) return age >= (metric === 'sales' ? 60_000 : 180_000)
   if (day === yesterday) return age >= 5 * 60_000
+  if (day < shiftIsoDate(today, -7)) return age >= 30 * 24 * 60 * 60_000
   return age >= 24 * 60 * 60_000
 }
 
@@ -168,6 +169,8 @@ export async function loadCompetitionSpan({ unitId, token, start, end, today, ki
     fetchedAt,
     orders: salesReady && !kitchenOnly ? orders : null,
     kitchenMinutes: kitchenReady ? averageMinutes(seconds, samples) : null,
+    observedOrders: coverage.salesDays && !kitchenOnly ? orders : null,
+    observedKitchenMinutes: coverage.kitchenDays ? averageMinutes(seconds, samples) : null,
     days: salesReady && kitchenReady ? data.map(({ day, sales, kitchen }) => ({
       date: day,
       orders: sales.value,

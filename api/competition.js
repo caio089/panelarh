@@ -20,6 +20,8 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método não permitido.' })
   const today = todayInFortaleza()
   const requestedDate = typeof req.query?.dia === 'string' ? req.query.dia : ''
+  const requestedStart = typeof req.query?.inicio === 'string' ? req.query.inicio : ''
+  const requestedEnd = typeof req.query?.fim === 'string' ? req.query.fim : ''
   const requestedPeriod = typeof req.query?.periodo === 'string' ? req.query.periodo : 'dia'
   const requestedUnit = typeof req.query?.unidade === 'string' ? req.query.unidade.trim().toLowerCase() : ''
   const dailyRanking = req.query?.modo === 'diario'
@@ -30,9 +32,14 @@ export default async function handler(req, res) {
   if (requestedDate && (!isIsoDate(requestedDate) || requestedDate > today)) {
     return res.status(400).json({ error: 'Informe uma data válida até hoje.' })
   }
-  if (!dailyRanking && requestedPeriod !== 'dia' && requestedPeriod !== 'mes') {
-    return res.status(400).json({ error: 'Informe período dia ou mes.' })
+  if (!dailyRanking && requestedPeriod !== 'dia' && requestedPeriod !== 'mes' && requestedPeriod !== 'intervalo') {
+    return res.status(400).json({ error: 'Informe período dia, mes ou intervalo.' })
   }
+  if (requestedPeriod === 'intervalo' && (
+    !isIsoDate(requestedStart) || !isIsoDate(requestedEnd) ||
+    requestedStart > requestedEnd || requestedEnd > today ||
+    (Date.parse(requestedEnd) - Date.parse(requestedStart)) / 86_400_000 > 365
+  )) return res.status(400).json({ error: 'Informe um intervalo válido de até 366 dias, sem datas futuras.' })
 
   const period = dailyRanking ? 'mes' : requestedPeriod
   const date = period === 'mes' ? today : requestedDate || today
@@ -42,13 +49,16 @@ export default async function handler(req, res) {
   const identity = { id: unit.id, name: unit.name }
   const options = { unitId: unit.id, token, today, kitchenOnly, fresh }
   try {
-    if (period === 'mes') {
-      const span = await loadCompetitionSpan({ ...options, start: `${date.slice(0, 7)}-01`, end: date })
+    if (period === 'mes' || period === 'intervalo') {
+      const start = period === 'intervalo' ? requestedStart : `${date.slice(0, 7)}-01`
+      const end = period === 'intervalo' ? requestedEnd : date
+      const span = await loadCompetitionSpan({ ...options, start, end })
       if (span.fill) waitUntil(span.fill().catch(() => undefined))
-      if (!fresh && requestedDate === today && !span.partial && !span.stale) cachePublicResult(res, 60)
+      if (!fresh && period === 'mes' && requestedDate === today && !span.partial && !span.stale) cachePublicResult(res, 60)
       return res.status(200).json({
-        date,
+        date: end,
         period,
+        ...(period === 'intervalo' ? { start, end, observedOrders: span.observedOrders, observedKitchenMinutes: span.observedKitchenMinutes } : {}),
         ...(span.fetchedAt ? { fetchedAt: new Date(span.fetchedAt).toISOString() } : {}),
         partial: span.partial,
         stale: span.stale,
