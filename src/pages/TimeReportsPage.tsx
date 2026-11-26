@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Upload } from 'lucide-react'
-import { PageHeader } from '@/components/ui'
+import { Modal, PageHeader } from '@/components/ui'
 import { listRhCollaborators, listRhUnits, type RhCollaborator, type RhUnit } from '@/lib/collaboratorsDb'
 import { formatMinutes, lateness, normalizeName, parseTimeReport, type ParsedReport } from '@/lib/timeReports'
 import { listTimeReports, saveTimeReport, type SavedTimeReport } from '@/lib/timeReportsDb'
@@ -49,6 +49,10 @@ export function TimeReportsPage() {
     return { collaborator, day, bank: balances.get(collaborator.id) }
   }).filter((row) => row.day || row.bank)
   const unmatched = week?.people.filter((person) => !person.collaboratorId) ?? []
+  const previewLinked = preview?.people.filter((person) => person.collaboratorId).length ?? 0
+  const previewExisting = preview && reports.some((report) =>
+    report.kind === preview.kind && report.period_from === preview.from && report.period_to === preview.to,
+  )
   async function openFile(file?: File) {
     if (!file) return
     if (!unitId) { setError('Selecione a unidade antes de importar.'); return }
@@ -92,7 +96,7 @@ export function TimeReportsPage() {
         <h2 className="font-display text-xl text-[var(--pv-ink)]">Importar relatório</h2>
         <p className="mt-1 text-xs text-[var(--pv-muted)]">Escolha a unidade do PDF. Envie um espelho semanal ou extrato mensal em PDF.</p>
         <label className="mt-4 block text-xs font-bold text-[var(--pv-ink)]">Unidade
-          <select className="mt-1 w-full rounded-xl border border-[var(--pv-line)] bg-white p-2.5 text-sm" value={unitId} onChange={(event) => { setUnitId(event.target.value); setPreview(null); setError(''); setWeekId('') }}>
+          <select className="mt-1 w-full rounded-xl border border-[var(--pv-line)] bg-white p-2.5 text-sm" value={unitId} disabled={busy} onChange={(event) => { setUnitId(event.target.value); setPreview(null); setError(''); setWeekId('') }}>
             {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
           </select>
         </label>
@@ -112,20 +116,29 @@ export function TimeReportsPage() {
     </div>
     {error && <p role="alert" className="mt-4 rounded-xl bg-red-100 p-3 text-sm text-red-800">{error}</p>}
     {notice && <p role="status" className="mt-4 rounded-xl bg-green-100 p-3 text-sm text-green-800">{notice}</p>}
-    {preview && <section className="mt-5 rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
-      <h2 className="font-display text-xl text-[var(--pv-ink)]">Conferir antes de salvar</h2>
-      <p className="mt-1 text-sm text-[var(--pv-muted)]">{preview.kind === 'espelho' ? 'Espelho semanal' : 'Banco de horas'} · {periodLabel(preview.from, preview.to)} · {preview.company} · {preview.people.length} pessoas</p>
-      <p className="mt-2 text-xs text-[var(--pv-muted)]">Associe os nomes sem correspondência. Pessoas não vinculadas não aparecem na tabela de ponto.</p>
-      <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
-        {preview.people.map((person, index) => <div key={`${person.sourceName}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--pv-line)] bg-white p-2.5 text-sm">
-          <span className="font-semibold text-[var(--pv-ink)]">{person.sourceName}</span>
-          <select aria-label={`Vincular ${person.sourceName}`} className="max-w-full rounded-lg border border-[var(--pv-line)] p-1.5 text-xs" value={person.collaboratorId ?? ''} onChange={(event) => linkPerson(index, event.target.value)}>
-            <option value="">Sem vínculo</option>{unitPeople.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.full_name}</option>)}
-          </select>
-        </div>)}
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => void save()} className="rounded-xl bg-[var(--pv-terracotta)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Salvar importação</button><button type="button" onClick={() => setPreview(null)} className="rounded-xl border border-[var(--pv-line)] px-4 py-2 text-sm font-bold text-[var(--pv-ink)]">Cancelar</button></div>
-    </section>}
+    <Modal open={Boolean(preview)} title="PDF reconhecido — salvar no banco?" onClose={() => { if (!busy) setPreview(null) }} wide>
+      {preview && <>
+        <p className="text-sm font-bold text-[var(--pv-ink)]">{preview.kind === 'espelho' ? 'Espelho de ponto semanal' : 'Extrato do banco de horas'}</p>
+        <p className="mt-1 text-sm text-[var(--pv-muted)]">{fileName} · {periodLabel(preview.from, preview.to)}</p>
+        <p className="mt-1 text-sm text-[var(--pv-muted)]">Unidade: {units.find((unit) => unit.id === unitId)?.name} · {previewLinked} de {preview.people.length} pessoas vinculadas</p>
+        {previewExisting && <p className="mt-3 rounded-xl bg-amber-100 p-3 text-xs text-amber-900">Já existe um relatório deste tipo e período. Salvar substituirá a importação anterior.</p>}
+        {previewLinked < preview.people.length && <p className="mt-3 rounded-xl bg-amber-100 p-3 text-xs text-amber-900">Revise os nomes sem vínculo abaixo. Eles serão guardados no relatório, mas não aparecerão na tabela por colaborador.</p>}
+        {error && <p role="alert" className="mt-3 rounded-xl bg-red-100 p-3 text-sm text-red-800">{error}</p>}
+        <div className="sticky top-0 z-10 mt-4 flex flex-wrap gap-2 bg-[var(--pv-surface)] py-2">
+          <button type="button" disabled={busy} onClick={() => void save()} className="rounded-xl bg-[var(--pv-terracotta)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Salvando…' : 'Salvar no banco de dados'}</button>
+          <button type="button" disabled={busy} onClick={() => setPreview(null)} className="rounded-xl border border-[var(--pv-line)] px-4 py-2.5 text-sm font-bold text-[var(--pv-ink)] disabled:opacity-50">Cancelar</button>
+        </div>
+        <p className="mt-3 text-xs text-[var(--pv-muted)]">Confira ou corrija o vínculo de cada pessoa antes de salvar.</p>
+        <div className="mt-3 space-y-2">
+          {preview.people.map((person, index) => <div key={`${person.sourceName}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--pv-line)] bg-white p-2.5 text-sm">
+            <span className="font-semibold text-[var(--pv-ink)]">{person.sourceName}</span>
+            <select aria-label={`Vincular ${person.sourceName}`} className="max-w-full rounded-lg border border-[var(--pv-line)] p-1.5 text-xs" value={person.collaboratorId ?? ''} disabled={busy} onChange={(event) => linkPerson(index, event.target.value)}>
+              <option value="">Sem vínculo</option>{unitPeople.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.full_name}</option>)}
+            </select>
+          </div>)}
+        </div>
+      </>}
+    </Modal>
     <section className="mt-5 rounded-2xl bg-[var(--pv-surface)] p-5 shadow-xl">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl text-[var(--pv-ink)]">Chegadas e banco de horas</h2><p className="text-xs text-[var(--pv-muted)]">{week ? `${periodLabel(week.period_from, week.period_to)} · ${week.company_name}` : 'Nenhum espelho importado para esta unidade.'}</p></div>
         <div className="flex flex-wrap gap-2">
